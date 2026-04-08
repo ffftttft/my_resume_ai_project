@@ -1,0 +1,8 @@
+# FastAPI service dependencies for the local resume generator prototype.
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+python-multipart>=0.0.9
+pydantic-settings>=2.3.0
+openai>=2.30.0
+pypdf>=5.0.0
+python-pptx>=1.0.2
