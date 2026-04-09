@@ -3,7 +3,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from ai_modules.engine_v2 import ResumeAIEngine
+from ai_modules.engine_v3 import ResumeAIEngine
 from app.config import settings
 from app.routers import resume as resume_router
 from app.services.file_service import FileService

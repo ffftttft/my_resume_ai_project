@@ -27,7 +27,6 @@ export default function ExistingResumePanel({
   additionalAnswerCount,
   onResumeSourceChange,
   onUploadResumeFile,
-  onGenerate,
   onClearInfo,
   onBack,
   hasPendingQuestions,
@@ -60,23 +59,17 @@ export default function ExistingResumePanel({
       <section className="paper-panel form-section-card p-6">
         <div className="form-section-card__head">
           <div>
-            <h3 className="form-section-card__title">执行优化</h3>
-            <p className="form-section-card__subtitle">确认岗位信息与简历原文后生成优化版本。</p>
+            <h3 className="form-section-card__title">资料状态</h3>
+            <p className="form-section-card__subtitle">
+              确认岗位信息与简历原文后，回到工作台使用外层主按钮启动流式优化。
+            </p>
           </div>
 
-        <div className="control-deck__actions">
-          <button type="button" onClick={onClearInfo} className="pill-button pill-button--ghost">
-            清空资料
-          </button>
-          <button
-            type="button"
-            onClick={onGenerate}
-            disabled={loading || !resumeSourceText.trim() || !jobInfoReady}
-            className="pill-button pill-button--primary"
-          >
-            {loading ? "优化中..." : "开始优化"}
-          </button>
-        </div>
+          <div className="control-deck__actions">
+            <button type="button" onClick={onClearInfo} className="pill-button pill-button--ghost">
+              清空资料
+            </button>
+          </div>
         </div>
 
         <p className="form-section-card__status-note">{statusText}</p>

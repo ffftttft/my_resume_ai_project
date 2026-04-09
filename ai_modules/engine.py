@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Dict, List
 from urllib.parse import urlparse
 
+import instructor
 from openai import OpenAI
 
 from ai_modules.prompts import (
@@ -16,10 +17,25 @@ from ai_modules.prompts import (
     RESUME_SYSTEM_PROMPT,
     REVISION_SYSTEM_PROMPT,
     build_existing_resume_input,
+    build_existing_resume_messages,
+    build_question_messages,
     build_questions_input,
     build_resume_input,
+    build_resume_messages,
     build_revision_input,
+    build_revision_messages,
 )
+from ai_modules.structured_contracts import (
+    ResumeEducationRecord,
+    ResumeExperienceRecord,
+    ResumeGenerationResult,
+    ResumeProjectRecord,
+    ResumeQuestionResult,
+    ResumeRevisionResult,
+    ResumeSkillCategory,
+    StructuredResume,
+)
+from ai_modules.structured_renderer import build_contract_report, render_resume_markdown
 
 
 class ResumeAIEngine:
@@ -36,6 +52,9 @@ class ResumeAIEngine:
             )
             if self.api_key
             else None
+        )
+        self.structured_client = (
+            instructor.from_openai(self.client, mode=instructor.Mode.TOOLS) if self.client else None
         )
         self.session_context: Dict[str, object] = {}
         self.reset_session_context()
@@ -141,6 +160,20 @@ class ResumeAIEngine:
 
         raw_text = self._stream_text(system_prompt, payload_text)
         return self._extract_json(raw_text)
+
+    def _call_structured(self, response_model, messages: List[Dict[str, str]], max_retries: int = 2):
+        """Call Instructor with a strict Pydantic response model."""
+
+        if not self.structured_client:
+            raise RuntimeError("Structured OpenAI client is not configured.")
+
+        return self.structured_client.chat.completions.create(
+            model=self.model_name,
+            response_model=response_model,
+            messages=messages,
+            max_retries=max_retries,
+            temperature=0.2,
+        )
 
     def probe_model(self) -> Dict:
         """Run a lightweight live probe against the configured model."""
@@ -355,6 +388,156 @@ class ResumeAIEngine:
             profile_payload.get("experiences", []), max_count, max_highlights
         )
         return compressed
+
+    def _categorize_skills(self, skills: List[str]) -> List[ResumeSkillCategory]:
+        """Group flat skill strings into lightweight categories for the frontend contract."""
+
+        buckets = {
+            "Frontend": [],
+            "Backend": [],
+            "Data": [],
+            "AI": [],
+            "Tools": [],
+            "Languages": [],
+            "Other": [],
+        }
+
+        for skill in self._nonempty(skills):
+            lowered = skill.lower()
+            if any(keyword in lowered for keyword in ["react", "vue", "css", "html", "vite", "javascript"]):
+                bucket = "Frontend"
+            elif any(keyword in lowered for keyword in ["python", "java", "golang", "fastapi", "sql", "mysql"]):
+                bucket = "Backend"
+            elif any(keyword in lowered for keyword in ["spark", "flink", "hive", "etl", "warehouse", "data"]):
+                bucket = "Data"
+            elif any(keyword in lowered for keyword in ["llm", "rag", "prompt", "openai", "agent", "ai"]):
+                bucket = "AI"
+            elif any(keyword in lowered for keyword in ["git", "docker", "linux", "k8s", "postman", "jenkins"]):
+                bucket = "Tools"
+            elif any(keyword in lowered for keyword in ["english", "chinese", "c++", "typescript"]):
+                bucket = "Languages"
+            else:
+                bucket = "Other"
+            if skill not in buckets[bucket]:
+                buckets[bucket].append(skill)
+
+        return [
+            ResumeSkillCategory(category=category, items=items)
+            for category, items in buckets.items()
+            if items
+        ]
+
+    def _structured_from_profile(self, profile_payload: Dict) -> StructuredResume:
+        """Build a deterministic structured resume from the existing profile payload."""
+
+        payload = self._compress_profile(profile_payload)
+        basic_info = payload.get("basic_info", {})
+
+        return StructuredResume(
+            contact={
+                "full_name": basic_info.get("name", "").strip(),
+                "email": basic_info.get("email", "").strip(),
+                "phone": basic_info.get("phone", "").strip(),
+                "city": basic_info.get("city", "").strip(),
+                "target_company": basic_info.get("target_company", "").strip(),
+                "target_role": basic_info.get("target_role", "").strip(),
+            },
+            summary=self._fallback_summary(payload),
+            experience=[
+                ResumeExperienceRecord(
+                    company_name=item.get("company", "").strip() or "Undisclosed Company",
+                    job_title=item.get("role", "").strip() or "Role",
+                    start_date=item.get("start_date", "").strip(),
+                    end_date=item.get("end_date", "").strip(),
+                    role_scope=self._attachment_excerpt(item, limit=110),
+                    achievements=self._nonempty(item.get("highlights", [])),
+                    tools=[],
+                )
+                for item in payload.get("experiences", [])
+            ],
+            education=[
+                ResumeEducationRecord(
+                    school_name=item.get("school", "").strip() or "School",
+                    degree=item.get("degree", "").strip(),
+                    major=item.get("major", "").strip(),
+                    start_date=item.get("start_date", "").strip(),
+                    end_date=item.get("end_date", "").strip(),
+                    highlights=self._nonempty(item.get("highlights", [])),
+                )
+                for item in payload.get("education", [])
+            ],
+            skills=self._categorize_skills(payload.get("skills", [])),
+            projects=[
+                ResumeProjectRecord(
+                    project_name=item.get("name", "").strip() or "Project",
+                    role=item.get("role", "").strip(),
+                    start_date=item.get("start_date", "").strip(),
+                    end_date=item.get("end_date", "").strip(),
+                    project_summary=item.get("description", "").strip() or self._attachment_excerpt(item, limit=120),
+                    achievements=self._nonempty(item.get("highlights", [])),
+                    tools=[],
+                )
+                for item in payload.get("projects", [])
+            ],
+        )
+
+    def _structured_from_existing_payload(self, payload: Dict) -> StructuredResume:
+        """Build a minimal structured resume from an uploaded resume payload."""
+
+        resume_text = self._plain_text(payload.get("resume_text", ""))
+        summary = "\n".join(line for line in resume_text.splitlines()[:6] if line.strip()).strip()
+
+        return StructuredResume(
+            contact={
+                "full_name": "",
+                "email": "",
+                "phone": "",
+                "city": "",
+                "target_company": (payload.get("target_company") or "").strip(),
+                "target_role": (payload.get("target_role") or "").strip(),
+            },
+            summary=summary,
+            experience=[],
+            education=[],
+            skills=[],
+            projects=[],
+        )
+
+    def _title_from_structured_resume(self, structured_resume: StructuredResume) -> str:
+        """Build a stable workspace title from the validated contract."""
+
+        headline = structured_resume.contact.full_name.strip() or "Resume Draft"
+        role = structured_resume.contact.target_role.strip()
+        return f"{headline} - {role}" if role else headline
+
+    def _result_from_structured_resume(
+        self,
+        structured_resume: StructuredResume,
+        analysis_notes: List[str],
+        questions: List[str] | None = None,
+        mode: str = "openai",
+        used_ai: bool = True,
+        title: str = "",
+    ) -> Dict:
+        """Convert a validated contract into the response shape expected by the UI."""
+
+        normalized_questions = [question for question in (questions or []) if question][:3]
+        workspace_title = (title or "").strip() or self._title_from_structured_resume(structured_resume)
+        return {
+            "title": workspace_title,
+            "resume_text": render_resume_markdown(structured_resume),
+            "structured_resume": structured_resume.model_dump(),
+            "analysis_notes": analysis_notes,
+            "questions": normalized_questions,
+            "needs_clarification": len(normalized_questions) > 0,
+            "used_ai": used_ai,
+            "mode": mode,
+            "contract_report": build_contract_report(
+                structured_resume,
+                renderer="instructor" if used_ai else "local_renderer",
+                question_count=len(normalized_questions),
+            ),
+        }
 
     def _fallback_summary(self, profile_payload: Dict) -> str:
         """Create a compact self-summary without real AI."""

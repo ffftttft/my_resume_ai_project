@@ -128,7 +128,6 @@ export default function UserFormPanel({
   onListItemChange,
   onAddListItem,
   onRemoveListItem,
-  onGenerate,
   onBack,
   hasPendingQuestions,
   onOpenQuestions,
@@ -157,7 +156,7 @@ export default function UserFormPanel({
         }
       />
 
-      <SectionCard title="执行生成" subtitle="保存当前资料并生成初版简历。">
+      <SectionCard title="资料管理" subtitle="保存当前资料后，回到工作台从外层主按钮启动生成。">
         <div className="control-deck__actions">
           <button type="button" onClick={onClearInfo} className="pill-button pill-button--ghost">
             清空资料
@@ -177,14 +176,6 @@ export default function UserFormPanel({
             className="pill-button pill-button--tint"
           >
             {draftSaving ? "保存中..." : "保存资料"}
-          </button>
-          <button
-            type="button"
-            onClick={onGenerate}
-            disabled={loading || !jobInfoReady}
-            className="pill-button pill-button--primary"
-          >
-            {loading ? "生成中..." : "生成简历"}
           </button>
         </div>
 
@@ -228,7 +219,7 @@ export default function UserFormPanel({
       </SectionCard>
 
       <SectionCard title="个人资料" subtitle="填写基础信息与个人概述。">
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="space-y-4">
           <Field label="姓名">
             <TextInput value={formState.basic_info.name} onChange={(value) => onBasicInfoChange("name", value)} placeholder="例如：张三" />
           </Field>
@@ -287,7 +278,7 @@ export default function UserFormPanel({
               <p className="form-stack-card__title">教育经历 #{index + 1}</p>
               {formState.education.length > 1 ? <RemoveButton onClick={() => onRemoveListItem("education", index)} /> : null}
             </div>
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-4">
               <Field label="学校">
                 <TextInput value={item.school} onChange={(value) => onListItemChange("education", index, "school", value)} placeholder="XX 大学" />
               </Field>
@@ -323,7 +314,7 @@ export default function UserFormPanel({
               <p className="form-stack-card__title">项目经历 #{index + 1}</p>
               {formState.projects.length > 1 ? <RemoveButton onClick={() => onRemoveListItem("projects", index)} /> : null}
             </div>
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-4">
               <Field label="项目名称">
                 <TextInput value={item.name} onChange={(value) => onListItemChange("projects", index, "name", value)} placeholder="校园活动管理平台" />
               </Field>
@@ -360,7 +351,7 @@ export default function UserFormPanel({
               <p className="form-stack-card__title">实习 / 工作经历 #{index + 1}</p>
               {formState.experiences.length > 1 ? <RemoveButton onClick={() => onRemoveListItem("experiences", index)} /> : null}
             </div>
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-4">
               <Field label="公司">
                 <TextInput value={item.company} onChange={(value) => onListItemChange("experiences", index, "company", value)} placeholder="示例科技" />
               </Field>

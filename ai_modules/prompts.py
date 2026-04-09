@@ -172,3 +172,158 @@ def build_existing_resume_input(
         ensure_ascii=False,
         indent=2,
     )
+
+
+STRICT_RESUME_SYSTEM_PROMPT = """
+You are a principal resume architect building a Chinese resume workspace.
+Return only content that fits the provided response schema.
+Write all user-facing text in Simplified Chinese.
+Never invent facts, numbers, tools, companies, dates, or outcomes that are not grounded in the input.
+Use Action-Task-Result framing inside every achievement bullet:
+1. Action: what the candidate concretely did.
+2. Task/Scope: what problem, module, flow, or business context it served.
+3. Result: what changed, shipped, improved, or was measured.
+Quantify the result only when the input supports a metric or count.
+If evidence is incomplete, ask at most 3 compressed follow-up questions and still fill the rest of the schema with supported facts.
+If additional_answers already contains useful follow-up evidence, do not ask more questions.
+
+Few-shot comparisons:
+Bad: Responsible for backend development and optimization.
+Good: 负责用户中心接口重构与缓存链路梳理，支撑高并发查询场景并将核心接口平均响应时间降低 32%。
+
+Bad: Participated in testing and team collaboration.
+Good: 搭建版本回归清单并联动前后端排查 18 个缺陷，使提测回退次数从 4 次降到 1 次。
+""".strip()
+
+
+STRICT_QUESTION_SYSTEM_PROMPT = """
+You identify the highest-value missing evidence in a Chinese resume workflow.
+Return only fields that fit the provided response schema.
+Write all user-facing text in Simplified Chinese.
+Ask at most 3 compressed questions total.
+Each question should merge related gaps, instead of splitting one topic into multiple tiny questions.
+Prioritize in this order:
+1. missing target-role evidence or core skills,
+2. the single most relevant experience or project,
+3. metrics and outcomes.
+If additional_answers already contains usable answers, return an empty questions array.
+""".strip()
+
+
+STRICT_REVISION_SYSTEM_PROMPT = """
+You revise a Chinese resume using a validated response schema.
+Return only schema fields.
+Write all user-facing text in Simplified Chinese.
+Preserve grounded facts from the current draft and profile payload.
+Apply the user's instruction by rewriting the strongest evidence in sharper Action-Task-Result language.
+Do not invent facts or metrics.
+""".strip()
+
+
+STRICT_EXISTING_RESUME_SYSTEM_PROMPT = """
+You optimize an uploaded Chinese resume for a target company and role using a validated response schema.
+Return only schema fields.
+Write all user-facing text in Simplified Chinese.
+Keep all output grounded in the uploaded resume, job context, and additional answers.
+Use Action-Task-Result phrasing for achievements and quantify outcomes when evidence exists.
+If evidence is still incomplete, ask at most 3 compressed questions.
+If additional_answers already contains useful evidence, do not ask more questions.
+""".strip()
+
+
+def build_resume_messages(profile_payload: Dict) -> list[Dict[str, str]]:
+    """Build chat-completions messages for new resume generation."""
+
+    return [
+        {"role": "system", "content": STRICT_RESUME_SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": json.dumps(
+                {
+                    "task": "generate_resume_contract",
+                    "instructions": {
+                        "selected_modules": profile_payload.get("modules", []),
+                        "membership_level": profile_payload.get("membership_level", "basic"),
+                        "respect_full_information": profile_payload.get("use_full_information", False),
+                        "target_output": "structured_resume",
+                    },
+                    "profile_payload": profile_payload,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+        },
+    ]
+
+
+def build_question_messages(profile_payload: Dict) -> list[Dict[str, str]]:
+    """Build chat-completions messages for compressed follow-up questions."""
+
+    return [
+        {"role": "system", "content": STRICT_QUESTION_SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": json.dumps(
+                {
+                    "task": "generate_clarification_questions",
+                    "profile_payload": profile_payload,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+        },
+    ]
+
+
+def build_revision_messages(profile_payload: Dict, resume_text: str, instruction: str) -> list[Dict[str, str]]:
+    """Build chat-completions messages for revising an existing draft."""
+
+    return [
+        {"role": "system", "content": STRICT_REVISION_SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": json.dumps(
+                {
+                    "task": "revise_resume_contract",
+                    "revision_instruction": instruction,
+                    "current_resume_text": resume_text,
+                    "profile_payload": profile_payload,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+        },
+    ]
+
+
+def build_existing_resume_messages(
+    resume_text: str,
+    target_company: str,
+    target_role: str,
+    job_requirements: str,
+    instruction: str,
+    additional_answers: list[Dict],
+    persistent_profile_memory: Dict | None = None,
+) -> list[Dict[str, str]]:
+    """Build chat-completions messages for optimizing an uploaded resume."""
+
+    return [
+        {"role": "system", "content": STRICT_EXISTING_RESUME_SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": json.dumps(
+                {
+                    "task": "optimize_existing_resume_contract",
+                    "resume_text": resume_text,
+                    "target_company": target_company,
+                    "target_role": target_role,
+                    "job_requirements": job_requirements,
+                    "instruction": instruction,
+                    "additional_answers": additional_answers,
+                    "persistent_profile_memory": persistent_profile_memory or {},
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+        },
+    ]

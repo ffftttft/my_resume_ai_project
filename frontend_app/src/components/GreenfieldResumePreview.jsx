@@ -1,5 +1,7 @@
 import React from "react";
 
+import ResumePreview from "./ResumePreview";
+
 export default function GreenfieldResumePreview({
   title,
   resumeText,
@@ -9,12 +11,18 @@ export default function GreenfieldResumePreview({
   onExport,
   generationMode,
   analysisNotes,
+  structuredResume,
+  contractReport,
+  streamingDraftText,
+  streamingStatus,
+  isStreaming,
   loading,
   revisionInstruction,
   onRevisionInstructionChange,
   onReviseWithAI,
 }) {
   const hasResume = Boolean(resumeText.trim());
+  const resumeLength = resumeText.trim().length;
   const displayTitle = title || "等待生成结果";
   const description = hasResume
     ? "这里展示新建简历的当前版本。你可以继续人工修订、保存版本，或追加 AI 优化指令。"
@@ -85,14 +93,43 @@ export default function GreenfieldResumePreview({
           </div>
         </div>
 
-        <div className="preview-stage__surface">
-          <textarea
-            value={resumeText}
-            onChange={(event) => onResumeChange(event.target.value)}
-            rows={24}
-            className="field-shell resume-text resume-editor-font preview-stage__editor w-full resize-y px-4 py-4 outline-none"
-            placeholder="生成后的简历内容会直接显示在这里。"
+        <div className="preview-stage__workspace">
+          <ResumePreview
+            structuredResume={structuredResume}
+            draftText={streamingDraftText}
+            isStreaming={isStreaming}
+            streamStatus={streamingStatus}
+            generationMode={generationMode}
           />
+
+          <div className="preview-stage__surface preview-stage__surface--editor">
+            <div className="preview-stage__editor-head">
+              <div>
+                <p className="preview-stage__label">实时正文</p>
+                <p className="preview-stage__caption">
+                  {isStreaming
+                    ? "右侧正文会随着模型返回的结果逐字写入，你可以直接看见它不是一次性刷出完整内容。"
+                    : "结构化结果会先落进这块正文区，后续可继续人工编辑和导出。"}
+                </p>
+              </div>
+
+              <div className="preview-stage__chips">
+                <span className={`chip ${isStreaming ? "accent-chip" : ""}`}>
+                  {isStreaming ? "逐字写入中" : hasResume ? "可人工编辑" : "等待正文"}
+                </span>
+                <span className="chip">{resumeLength > 0 ? `${resumeLength} 个字符` : "尚无正文"}</span>
+              </div>
+            </div>
+
+            <textarea
+              value={resumeText}
+              onChange={(event) => onResumeChange(event.target.value)}
+              readOnly={isStreaming}
+              rows={24}
+              className="field-shell resume-text resume-editor-font preview-stage__editor w-full resize-y px-4 py-4 outline-none"
+              placeholder={isStreaming ? "正在实时写入简历正文..." : "生成后的简历内容会直接显示在这里。"}
+            />
+          </div>
         </div>
       </section>
 

@@ -8,7 +8,6 @@ import {
   fetchHealth,
   fetchMemory,
   fetchModelStatus,
-  generateResume,
   optimizeExistingResume,
   previewUploadedFile,
   reviseResume,
@@ -17,6 +16,10 @@ import {
   saveWorkspaceDraft,
   uploadFiles,
 } from "./api";
+import {
+  generateGreenfieldResumeStream,
+  generateResumeStream,
+} from "./lib/ai-service";
 import ExistingResumePanel from "./components/ExistingResumePanel";
 import ExistingResumePreview from "./components/ExistingResumePreview";
 import GreenfieldResumePreview from "./components/GreenfieldResumePreview";
@@ -25,6 +28,7 @@ import ModeSelectionDialog from "./components/ModeSelectionDialog";
 import QuestionCard from "./components/QuestionCard";
 import RecordPreviewDialog from "./components/RecordPreviewDialog";
 import UserFormPanel from "./components/UserFormPanel";
+import { renderStructuredResumeMarkdown } from "./lib/resume-renderer";
 
 function createEmptyEducation() {
   return {
@@ -76,6 +80,8 @@ function createEmptyResumeWorkspace() {
     analysis_notes: [],
     generation_mode: "fallback",
     revision_instruction: "",
+    structured_resume: null,
+    contract_report: null,
   };
 }
 
@@ -87,6 +93,17 @@ function createEmptyExistingResumeInput() {
     resume_source_text: "",
     resume_source_name: "",
     additional_answers: [],
+  };
+}
+
+function createEmptyLiveStreamState() {
+  return {
+    board: "",
+    active: false,
+    status: "",
+    partial_result: null,
+    raw_json: "",
+    error: "",
   };
 }
 
@@ -395,9 +412,15 @@ export default function App() {
   const [workspaceReady, setWorkspaceReady] = useState(false);
   const [recordPreview, setRecordPreview] = useState(() => buildRecordPreviewState());
   const [sessionUsername, setSessionUsername] = useState("ft");
+  const [liveStreamState, setLiveStreamState] = useState(() => createEmptyLiveStreamState());
 
   const lastSavedDraftHashRef = useRef("");
   const draftSaveInFlightRef = useRef(false);
+  const liveStreamAbortRef = useRef(null);
+  const streamRevealTimerRef = useRef(null);
+  const streamRevealTargetRef = useRef("");
+  const streamRevealCurrentRef = useRef("");
+  const streamRevealBoardRef = useRef("");
 
   const loading = Boolean(loadingAction);
   const greenfieldJobInfoReady = hasRequiredJobInfo(greenfieldFormState.basic_info);
@@ -429,14 +452,121 @@ export default function App() {
     );
   }
 
-  function applyWorkspaceResult(board, result) {
+  function stopResumeReveal() {
+    if (streamRevealTimerRef.current) {
+      window.clearInterval(streamRevealTimerRef.current);
+      streamRevealTimerRef.current = null;
+    }
+  }
+
+  function resetResumeReveal() {
+    stopResumeReveal();
+    streamRevealTargetRef.current = "";
+    streamRevealCurrentRef.current = "";
+    streamRevealBoardRef.current = "";
+  }
+
+  function setResumeTextImmediate(board, nextText) {
+    const normalized = normalizeResumeText(nextText || "");
+    streamRevealBoardRef.current = board;
+    streamRevealTargetRef.current = normalized;
+    streamRevealCurrentRef.current = normalized;
+    updateWorkspace(board, (previous) => ({
+      ...previous,
+      resume_text: normalized,
+    }));
+  }
+
+  function queueResumeTextReveal(board, nextText) {
+    const normalized = normalizeResumeText(nextText || "");
+    if (streamRevealBoardRef.current && streamRevealBoardRef.current !== board) {
+      resetResumeReveal();
+    }
+    streamRevealBoardRef.current = board;
+
+    if (!normalized) {
+      setResumeTextImmediate(board, "");
+      return;
+    }
+
+    const currentText = streamRevealCurrentRef.current || "";
+    streamRevealTargetRef.current = normalized;
+
+    if (!normalized.startsWith(currentText)) {
+      setResumeTextImmediate(board, normalized);
+      return;
+    }
+
+    if (currentText === normalized) {
+      return;
+    }
+
+    if (streamRevealTimerRef.current) {
+      return;
+    }
+
+    streamRevealTimerRef.current = window.setInterval(() => {
+      const boardName = streamRevealBoardRef.current || board;
+      const currentValue = streamRevealCurrentRef.current || "";
+      const targetValue = streamRevealTargetRef.current || "";
+
+      if (!targetValue) {
+        stopResumeReveal();
+        return;
+      }
+
+      if (!targetValue.startsWith(currentValue)) {
+        streamRevealCurrentRef.current = targetValue;
+        updateWorkspace(boardName, (previous) => ({
+          ...previous,
+          resume_text: targetValue,
+        }));
+        stopResumeReveal();
+        return;
+      }
+
+      if (currentValue === targetValue) {
+        stopResumeReveal();
+        return;
+      }
+
+      const remaining = targetValue.slice(currentValue.length);
+      const nextValue = `${currentValue}${remaining.slice(0, 1)}`;
+      streamRevealCurrentRef.current = nextValue;
+      updateWorkspace(boardName, (previous) => ({
+        ...previous,
+        resume_text: nextValue,
+      }));
+
+      if (nextValue === targetValue) {
+        stopResumeReveal();
+      }
+    }, 18);
+  }
+
+  function renderStructuredResumeText(structuredResume) {
+    if (!structuredResume || typeof structuredResume !== "object") {
+      return "";
+    }
+    return normalizeResumeText(renderStructuredResumeMarkdown(structuredResume));
+  }
+
+  function applyWorkspaceResult(board, result, options = {}) {
+    const nextResumeText = normalizeResumeText(result.resume_text || "");
+    if (!options.preserveResumeText) {
+      streamRevealBoardRef.current = board;
+      streamRevealTargetRef.current = nextResumeText;
+      streamRevealCurrentRef.current = nextResumeText;
+    }
     updateWorkspace(board, (previous) => ({
       ...previous,
       title:
         result.title || (board === "existing_resume" ? "优化版简历草稿" : "新建简历草稿"),
-      resume_text: normalizeResumeText(result.resume_text || ""),
+      ...(options.preserveResumeText ? {} : { resume_text: nextResumeText }),
       analysis_notes: result.analysis_notes || [],
       generation_mode: result.mode || previous.generation_mode || "fallback",
+      structured_resume: result.structured_resume || null,
+      contract_report: result.contract_report || null,
     }));
   }
 
@@ -447,8 +577,8 @@ export default function App() {
     );
   }
 
-  function applyResult(board, result, successMessage) {
-    applyWorkspaceResult(board, result);
+  function applyResult(board, result, successMessage, options = {}) {
+    applyWorkspaceResult(board, result, options);
     if ((result.questions || []).length > 0) {
       setQuestionDrafts(result.questions);
     } else {
@@ -462,6 +592,9 @@ export default function App() {
   function handleSwitchBoard(nextBoard) {
     if (nextBoard === activeBoard) return;
 
+    liveStreamAbortRef.current?.abort?.();
+    resetResumeReveal();
+    setLiveStreamState(createEmptyLiveStreamState());
     setActiveBoard(nextBoard);
     setActiveInfoPage(null);
     setQuestionsOpen(false);
@@ -754,26 +887,126 @@ export default function App() {
       return;
     }
 
+    liveStreamAbortRef.current?.abort?.();
+    const controller = new AbortController();
+    liveStreamAbortRef.current = controller;
+    resetResumeReveal();
+    setActiveInfoPage(null);
     setLoadingAction("generate");
+    setResumeTextImmediate("greenfield", "");
+    updateWorkspace("greenfield", (previous) => ({
+      ...previous,
+      title: "",
+      resume_text: "",
+      structured_resume: null,
+      contract_report: null,
+      analysis_notes: [],
+      generation_mode: "streaming",
+    }));
+    setLiveStreamState({
+      board: "greenfield",
+      active: true,
+      status: "正在锁定数据契约并启动 AI 流式生成...",
+      partial_result: null,
+      raw_json: "",
+      error: "",
+    });
     try {
-      const result = await generateResume({
-        profile: buildProfilePayload(nextFormState),
-      });
-      applyResult(
-        "greenfield",
-        result,
-        result.needs_clarification
-          ? "新建简历初稿已生成，仍有部分信息待补充。"
-          : `${sourceLabel}，你可以继续手动修改，或补充修订要求后交给 AI。`,
+      const result = await generateGreenfieldResumeStream(
+        {
+          profile: buildProfilePayload(nextFormState),
+        },
+        {
+          signal: controller.signal,
+          onStatus: (payload) => {
+            setLiveStreamState((previous) => ({
+              ...previous,
+              board: "greenfield",
+              status: payload?.message || previous.status,
+            }));
+          },
+          onPartial: (partialResult, rawJson) => {
+            setLiveStreamState((previous) => ({
+              ...previous,
+              board: "greenfield",
+              partial_result: partialResult,
+              raw_json: rawJson,
+            }));
+            if (partialResult?.structured_resume) {
+              const previewText = renderStructuredResumeText(partialResult.structured_resume);
+              queueResumeTextReveal("greenfield", previewText);
+              updateWorkspace("greenfield", (previous) => ({
+                ...previous,
+                title: partialResult.title || previous.title,
+                structured_resume: partialResult.structured_resume || previous.structured_resume,
+                analysis_notes:
+                  partialResult.analysis_notes?.length > 0
+                    ? partialResult.analysis_notes
+                    : previous.analysis_notes,
+                generation_mode: previous.generation_mode === "openai" ? previous.generation_mode : "streaming",
+              }));
+            }
+          },
+          onError: (error) => {
+            setLiveStreamState((previous) => ({
+              ...previous,
+              board: "greenfield",
+              error: error.message,
+              status: error.message,
+            }));
+          },
+          onFinal: (result) => {
+            queueResumeTextReveal(
+              "greenfield",
+              result.resume_text || renderStructuredResumeText(result.structured_resume),
+            );
+            setLiveStreamState((previous) => ({
+              ...previous,
+              board: "greenfield",
+              error: "",
+            }));
+            applyResult(
+              "greenfield",
+              result,
+              result.mode === "fallback"
+                ? "结构化流式未完全锁定，系统已自动切换为本地结构化结果。"
+                : result.needs_clarification
+                ? "新建简历初稿已生成，仍有部分信息待补充。"
+                : `${sourceLabel}，你可以继续手动修改，或补充修订要求后交给 AI。`,
+              { preserveResumeText: true },
+            );
+          },
+        },
       );
+      setLiveStreamState((previous) => ({
+        ...previous,
+        board: "greenfield",
+        active: false,
+        status:
+          result.mode === "fallback"
+            ? "已切换为本地结构化结果，可继续编辑与导出。"
+            : "流式生成完成，结构化契约已锁定。",
+        partial_result: result,
+        error: "",
+      }));
       setQuestionFlowMode("greenfield");
-      setActiveInfoPage(null);
       if (result.needs_clarification && (result.questions || []).length > 0) {
         setQuestionsOpen(true);
       }
       await refreshMemory();
     } catch (error) {
-      setStatusText(`生成失败：${error.message}`);
+      if (error?.name === "AbortError") {
+        setStatusText("已中止流式生成。");
+      } else {
+        setStatusText(`生成失败：${error.message}`);
+      }
+      setLiveStreamState((previous) => ({
+        ...previous,
+        board: "greenfield",
+        active: false,
+        error: error?.message || "流式生成失败。",
+        status: error?.message || "流式生成失败。",
+      }));
     } finally {
       setLoadingAction("");
     }
@@ -894,6 +1127,161 @@ export default function App() {
     }
   }
 
+  async function runExistingResumeStream() {
+    const requiredJobInfoError = getRequiredJobInfoError(existingFormState);
+    if (requiredJobInfoError) {
+      setStatusText(requiredJobInfoError);
+      return;
+    }
+
+    if (!existingFormState.resume_source_text.trim()) {
+      setStatusText("请先上传或粘贴你的现有简历，然后再开始流式生成。");
+      return;
+    }
+
+    liveStreamAbortRef.current?.abort?.();
+    const controller = new AbortController();
+    liveStreamAbortRef.current = controller;
+    resetResumeReveal();
+    setActiveInfoPage(null);
+
+    setLoadingAction("existing_stream");
+    setResumeTextImmediate("existing_resume", "");
+    updateWorkspace("existing_resume", (previous) => ({
+      ...previous,
+      title: "",
+      resume_text: "",
+      structured_resume: null,
+      contract_report: null,
+      analysis_notes: [],
+      generation_mode: "streaming",
+    }));
+    setLiveStreamState({
+      board: "existing_resume",
+      active: true,
+      status: "正在锁定数据契约并启动 AI 流式生成...",
+      partial_result: null,
+      raw_json: "",
+      error: "",
+    });
+    setStatusText("正在打开流式生成，右侧预览会随着结果实时更新。");
+
+    try {
+      const finalResult = await generateResumeStream(
+        {
+          resume_text: existingFormState.resume_source_text,
+          target_company: existingFormState.target_company,
+          target_role: existingFormState.target_role,
+          job_requirements: existingFormState.job_requirements,
+          instruction: existingResumeWorkspace.revision_instruction || "",
+          additional_answers: existingFormState.additional_answers || [],
+        },
+        {
+          signal: controller.signal,
+          onStatus: (payload) => {
+            setLiveStreamState((previous) => ({
+              ...previous,
+              board: "existing_resume",
+              status: payload?.message || previous.status,
+            }));
+          },
+          onPartial: (partialResult, rawJson) => {
+            setLiveStreamState((previous) => ({
+              ...previous,
+              board: "existing_resume",
+              partial_result: partialResult,
+              raw_json: rawJson,
+            }));
+            if (partialResult?.structured_resume) {
+              const previewText = renderStructuredResumeText(partialResult.structured_resume);
+              queueResumeTextReveal("existing_resume", previewText);
+              updateWorkspace("existing_resume", (previous) => ({
+                ...previous,
+                title: partialResult.title || previous.title,
+                structured_resume: partialResult.structured_resume || previous.structured_resume,
+                analysis_notes:
+                  partialResult.analysis_notes?.length > 0
+                    ? partialResult.analysis_notes
+                    : previous.analysis_notes,
+                generation_mode: previous.generation_mode === "openai" ? previous.generation_mode : "streaming",
+              }));
+            }
+          },
+          onError: (error) => {
+            setLiveStreamState((previous) => ({
+              ...previous,
+              board: "existing_resume",
+              error: error.message,
+              status: error.message,
+            }));
+          },
+          onFinal: (result) => {
+            queueResumeTextReveal(
+              "existing_resume",
+              result.resume_text || renderStructuredResumeText(result.structured_resume),
+            );
+            setLiveStreamState((previous) => ({
+              ...previous,
+              board: "existing_resume",
+              error: "",
+            }));
+            applyResult(
+              "existing_resume",
+              result,
+              result.mode === "fallback"
+                ? "结构化流式未完全锁定，系统已自动切换为本地结构化结果。"
+                : result.needs_clarification
+                ? "流式生成完成，但仍有部分信息需要补充。"
+                : "流式生成完成，右侧预览已锁定最新结果。",
+              { preserveResumeText: true },
+            );
+          },
+        },
+      );
+      setLiveStreamState((previous) => ({
+        ...previous,
+        board: "existing_resume",
+        active: false,
+        status:
+          finalResult.mode === "fallback"
+            ? "已切换为本地结构化结果，可继续编辑与导出。"
+            : "流式生成完成，结构化契约已锁定。",
+        partial_result: finalResult,
+        error: "",
+      }));
+      if (finalResult.needs_clarification && (finalResult.questions || []).length > 0) {
+        setQuestionFlowMode("existing_resume");
+        setQuestionsOpen(true);
+      }
+      await refreshMemory();
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        setStatusText("已中止流式生成。");
+      } else {
+        setStatusText(`流式生成失败：${error.message}`);
+      }
+      setLiveStreamState((previous) => ({
+        ...previous,
+        board: "existing_resume",
+        active: false,
+        error: error?.message || "流式生成失败。",
+        status: error?.message || "流式生成失败。",
+      }));
+    } finally {
+      setLoadingAction("");
+    }
+  }
+
+  async function handlePrimaryWorkspaceAction() {
+    if (activeBoard === "existing_resume") {
+      await runExistingResumeStream();
+      return;
+    }
+
+    setActiveInfoPage(null);
+    await generateWithCurrentState(greenfieldFormState, "简历初稿已生成");
+  }
+
   async function handleSubmitQuestions() {
     const answeredQuestions = questions
       .map((question) => ({
@@ -936,6 +1324,7 @@ export default function App() {
   }
 
   function handleClearGreenfieldInfo() {
+    resetResumeReveal();
     setGreenfieldFormState(cloneFormState(INITIAL_GREENFIELD_FORM_STATE));
     setQuestions([]);
     setQuestionAnswers({});
@@ -943,13 +1332,17 @@ export default function App() {
   }
 
   function handleClearExistingInfo() {
+    liveStreamAbortRef.current?.abort?.();
+    resetResumeReveal();
     setExistingFormState(createEmptyExistingResumeInput());
+    setLiveStreamState(createEmptyLiveStreamState());
     setQuestions([]);
     setQuestionAnswers({});
     setStatusText("已清空现有简历优化资料页中的岗位信息、简历原文和补充回答。");
   }
 
   function handleClearResume() {
+    resetResumeReveal();
     updateWorkspace(activeBoard, createEmptyResumeWorkspace());
     setQuestions([]);
     setQuestionAnswers({});
@@ -1354,6 +1747,27 @@ export default function App() {
     activeBoard === "existing_resume"
       ? "岗位锚点与原始简历越完整，优化结果越接近目标职位。"
       : "岗位信息、候选人素材和附件上下文越完整，生成草稿越稳。";
+  const primaryWorkspaceActionLabel =
+    activeBoard === "existing_resume"
+      ? liveStreamState.active
+        ? "流式优化进行中..."
+        : "开始流式优化"
+      : loadingAction === "generate"
+        ? "生成中..."
+        : "生成简历";
+  const primaryWorkspaceActionDisabled =
+    activeBoard === "existing_resume"
+      ? loading || !existingJobInfoReady || !existingResumeReady
+      : loading || !greenfieldJobInfoReady;
+  const workspaceCommandTitle =
+    activeBoard === "existing_resume" ? "流式监控面板" : "生成状态面板";
+  const workspaceCommandDescription =
+    activeBoard === "existing_resume"
+      ? "开始流式优化后，这里会持续显示状态变化和结构化 JSON 片段，方便确认它不是一次性返回。"
+      : "这里用于查看生成前后的工作区状态，主生成按钮已经移动到右侧资料录入卡片旁边。";
+  const liveStreamSnippet = liveStreamState.raw_json
+    ? liveStreamState.raw_json.slice(-1200)
+    : "";
   const activeFlowSteps =
     activeBoard === "existing_resume"
       ? [
@@ -1454,6 +1868,92 @@ export default function App() {
             done: greenfieldAttachmentCount > 0,
           },
         ];
+  const isActiveBoardStreaming = liveStreamState.board === activeBoard && liveStreamState.active;
+  const activeStreamCharCount =
+    liveStreamState.board === activeBoard ? liveStreamState.raw_json.length : 0;
+  const activePartialResult =
+    liveStreamState.board === activeBoard ? liveStreamState.partial_result : null;
+  const activeStructuredResume =
+    activeWorkspace.structured_resume || activePartialResult?.structured_resume || null;
+  const activeContractReport =
+    activeWorkspace.contract_report || activePartialResult?.contract_report || null;
+  const activeSectionCounts = activeContractReport?.section_counts || {};
+  const activeStructuredExperienceCount = Array.isArray(activeStructuredResume?.experience)
+    ? activeStructuredResume.experience.length
+    : 0;
+  const activeStructuredProjectCount = Array.isArray(activeStructuredResume?.projects)
+    ? activeStructuredResume.projects.length
+    : 0;
+  const activeStructuredEducationCount = Array.isArray(activeStructuredResume?.education)
+    ? activeStructuredResume.education.length
+    : 0;
+  const activeStructuredSkillCount = Array.isArray(activeStructuredResume?.skills)
+    ? activeStructuredResume.skills.length
+    : 0;
+  const activeResumeLength = activeWorkspace.resume_text.trim().length;
+  const activeAnalysisCount = activeWorkspace.analysis_notes?.length || 0;
+  const activeQuestionCount =
+    activeContractReport?.question_count ??
+    (hasPendingQuestionsForActiveBoard ? questions.length : 0);
+  const workspaceMonitorLabel = isActiveBoardStreaming
+    ? "流式写入中"
+    : activeBoard === "existing_resume"
+      ? existingResumeReady
+        ? "待启动优化"
+        : "待准备资料"
+      : greenfieldJobInfoReady
+        ? "待启动生成"
+        : "待准备资料";
+  const workspaceMonitorSummary =
+    activeBoard === "existing_resume"
+      ? existingResumeReady
+        ? "点击资料录入旁边的主按钮后，模型会按岗位锚点和原始简历逐段回写右侧正文。"
+        : "请先补齐岗位信息并导入原始简历，再从左侧控制塔启动流式优化。"
+      : greenfieldJobInfoReady
+        ? "点击左侧控制塔主按钮后，模型会根据候选人素材与附件上下文逐段生成草稿。"
+        : "请先完善岗位信息与候选人素材，再启动流式生成。";
+  const workspaceMonitorDetail =
+    liveStreamState.board === activeBoard && liveStreamState.status
+      ? liveStreamState.status
+      : activeBoard === "existing_resume"
+        ? "优化模式会先锁定结构化契约，再逐步将可用字段和最终正文同步到右侧预览。"
+        : "新建模式会先出现骨架，再根据已收到的片段逐字写入右侧正文。";
+  const workspaceMonitorJsonFallback =
+    activeBoard === "existing_resume"
+      ? "开始流式优化后，这里会持续显示模型已经返回的结构化 JSON 片段。"
+      : "启动生成后，这里会显示模型当前已经返回的结构化 JSON 片段，方便确认它不是一次性输出完整结果。";
+  const workspaceMonitorStats = [
+    {
+      label: "正文字符",
+      value: activeResumeLength,
+      meta: activeResumeLength > 0 ? "右侧正文已落版" : "等待正文写入",
+    },
+    {
+      label: "工作经历",
+      value: activeSectionCounts.experience ?? activeStructuredExperienceCount,
+      meta: "结构化工作经历条目",
+    },
+    {
+      label: "项目经历",
+      value: activeSectionCounts.projects ?? activeStructuredProjectCount,
+      meta: "项目证明与成果卡片",
+    },
+    {
+      label: "教育背景",
+      value: activeSectionCounts.education ?? activeStructuredEducationCount,
+      meta: "学校、学位与亮点",
+    },
+    {
+      label: "技能分组",
+      value: activeSectionCounts.skill_categories ?? activeStructuredSkillCount,
+      meta: "已生成的技能分组数",
+    },
+    {
+      label: "处理说明",
+      value: activeAnalysisCount,
+      meta: activeQuestionCount > 0 ? `${activeQuestionCount} 个追问待处理` : "当前无待处理追问",
+    },
+  ];
 
   return (
     <div className="app-shell min-h-screen px-4 py-6 lg:px-8">
@@ -1641,6 +2141,124 @@ export default function App() {
               <span className="chip">{loading ? "当前有任务执行中" : "当前空闲，可继续操作"}</span>
             </div>
           </div>
+
+          <div className="workspace-status-strip">
+            <div className="workspace-status-chip">
+              <span className="workspace-status-chip__label">当前模式</span>
+              <strong className="workspace-status-chip__value">{currentModeLabel}</strong>
+            </div>
+            <div className="workspace-status-chip">
+              <span className="workspace-status-chip__label">准备度</span>
+              <strong className="workspace-status-chip__value">{activeReadiness}%</strong>
+            </div>
+            <div className="workspace-status-chip">
+              <span className="workspace-status-chip__label">正文进度</span>
+              <strong className="workspace-status-chip__value">
+                {activeResumeLength > 0 ? `${activeResumeLength} 字符` : "尚未落版"}
+              </strong>
+            </div>
+          </div>
+        </section>
+
+        <section className="paper-panel-strong workspace-monitor px-5 py-5">
+          <div className="workspace-monitor__header">
+            <div>
+              <p className="text-sm font-semibold tracking-[0.28em] text-[var(--accent)] uppercase">
+                工作台监控
+              </p>
+              <h2 className="mt-2 text-2xl font-semibold text-[var(--ink)]">
+                {workspaceCommandTitle}
+              </h2>
+              <p className="mt-3 max-w-4xl text-sm leading-7 text-[var(--muted)]">
+                {workspaceCommandDescription}
+              </p>
+            </div>
+
+            <div className="workspace-monitor__chips">
+              <span className={`chip ${isActiveBoardStreaming ? "accent-chip" : ""}`}>
+                {workspaceMonitorLabel}
+              </span>
+              <span className="chip">
+                {activeStreamCharCount > 0
+                  ? `已接收 ${activeStreamCharCount} 个字符`
+                  : `当前准备度 ${activeReadiness}%`}
+              </span>
+              {activeContractReport?.validated ? <span className="chip">契约已锁定</span> : null}
+              {hasPendingQuestionsForActiveBoard ? (
+                <span className="chip">有待处理追问</span>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="workspace-monitor-grid">
+            <article
+              className={`workspace-monitor-card workspace-monitor-card--status ${
+                isActiveBoardStreaming ? "is-live" : ""
+              } ${liveStreamState.error ? "is-danger" : ""}`}
+            >
+              <div className="workspace-monitor-card__head">
+                <p className="workspace-monitor-card__eyebrow">通道状态</p>
+                <span className={`workspace-monitor-pill ${isActiveBoardStreaming ? "is-live" : ""}`}>
+                  {workspaceMonitorLabel}
+                </span>
+              </div>
+              <h3 className="workspace-monitor-card__title">
+                {activeBoard === "existing_resume" ? "优化流" : "生成流"}
+              </h3>
+              <p className="workspace-monitor-card__copy">{workspaceMonitorSummary}</p>
+
+              <div className="workspace-monitor-stack">
+                <div className="workspace-monitor-stack__item">
+                  <span className="workspace-monitor-stack__label">实时状态</span>
+                  <p>{workspaceMonitorDetail}</p>
+                </div>
+                <div className="workspace-monitor-stack__item">
+                  <span className="workspace-monitor-stack__label">当前焦点</span>
+                  <p>
+                    {activeBoard === "existing_resume"
+                      ? "以岗位要求为锚点优化现有简历，并同步刷新右侧正文。"
+                      : "以目标岗位与候选人素材为基础生成全新简历草稿。"}
+                  </p>
+                </div>
+              </div>
+
+              {liveStreamState.error ? (
+                <p className="workspace-monitor-card__error">{liveStreamState.error}</p>
+              ) : null}
+            </article>
+
+            <article className="workspace-monitor-card workspace-monitor-card--contract">
+              <div className="workspace-monitor-card__head">
+                <p className="workspace-monitor-card__eyebrow">契约快照</p>
+                <span className="workspace-monitor-pill">
+                  {activeContractReport?.validated ? "已校验" : "待校验"}
+                </span>
+              </div>
+
+              <div className="workspace-monitor-stat-grid">
+                {workspaceMonitorStats.map((stat) => (
+                  <div key={stat.label} className="workspace-monitor-stat">
+                    <span className="workspace-monitor-stat__label">{stat.label}</span>
+                    <strong className="workspace-monitor-stat__value">{stat.value}</strong>
+                    <p className="workspace-monitor-stat__meta">{stat.meta}</p>
+                  </div>
+                ))}
+              </div>
+            </article>
+
+            <article className="workspace-monitor-card workspace-monitor-card--stream">
+              <div className="workspace-monitor-card__head">
+                <p className="workspace-monitor-card__eyebrow">实时 JSON 通道</p>
+                <span className="workspace-monitor-pill">
+                  {activeStreamCharCount > 0 ? `${activeStreamCharCount} 个字符` : "等待输出"}
+                </span>
+              </div>
+
+              <pre className="workspace-monitor-card__pre">
+                {liveStreamSnippet || workspaceMonitorJsonFallback}
+              </pre>
+            </article>
+          </div>
         </section>
 
         {activeInfoPage ? (
@@ -1678,7 +2296,6 @@ export default function App() {
                 onListItemChange={updateGreenfieldListItem}
                 onAddListItem={addListItem}
                 onRemoveListItem={removeListItem}
-                onGenerate={() => generateWithCurrentState(greenfieldFormState, "简历初稿已生成")}
                 onBack={handleCloseInfoPage}
                 hasPendingQuestions={hasPendingQuestionsForActiveBoard}
                 onOpenQuestions={() => setQuestionsOpen(true)}
@@ -1696,7 +2313,6 @@ export default function App() {
                 additionalAnswerCount={existingAnswerCount}
                 onResumeSourceChange={(value) => updateExistingField("resume_source_text", value)}
                 onUploadResumeFile={handleExistingResumeUpload}
-                onGenerate={() => runExistingResumeOptimize()}
                 onClearInfo={handleClearExistingInfo}
                 onBack={handleCloseInfoPage}
                 hasPendingQuestions={hasPendingQuestionsForActiveBoard}
@@ -1723,6 +2339,17 @@ export default function App() {
                     onExport={handleExport}
                     generationMode={existingResumeWorkspace.generation_mode}
                     analysisNotes={existingResumeWorkspace.analysis_notes}
+                    structuredResume={existingResumeWorkspace.structured_resume}
+                    contractReport={existingResumeWorkspace.contract_report}
+                    streamingDraftText={
+                      liveStreamState.board === "existing_resume" ? liveStreamState.raw_json : ""
+                    }
+                    streamingStatus={
+                      liveStreamState.board === "existing_resume" ? liveStreamState.status : ""
+                    }
+                    isStreaming={
+                      liveStreamState.board === "existing_resume" && liveStreamState.active
+                    }
                     loading={loading}
                     revisionInstruction={existingResumeWorkspace.revision_instruction}
                     onRevisionInstructionChange={(value) =>
@@ -1748,6 +2375,15 @@ export default function App() {
                     onExport={handleExport}
                     generationMode={greenfieldWorkspace.generation_mode}
                     analysisNotes={greenfieldWorkspace.analysis_notes}
+                    structuredResume={greenfieldWorkspace.structured_resume}
+                    contractReport={greenfieldWorkspace.contract_report}
+                    streamingDraftText={
+                      liveStreamState.board === "greenfield" ? liveStreamState.raw_json : ""
+                    }
+                    streamingStatus={
+                      liveStreamState.board === "greenfield" ? liveStreamState.status : ""
+                    }
+                    isStreaming={liveStreamState.board === "greenfield" && liveStreamState.active}
                     loading={loading}
                     revisionInstruction={greenfieldWorkspace.revision_instruction}
                     onRevisionInstructionChange={(value) =>
@@ -1762,7 +2398,7 @@ export default function App() {
               </div>
 
               <aside className="workspace-rail">
-                <section className="paper-panel workspace-entry-card p-6 lg:p-7">
+                <section className="paper-panel workspace-entry-card workspace-entry-card--glass p-6 lg:p-7">
                   <div className="workspace-entry-card__header">
                     <div>
                       <p className="text-sm font-semibold tracking-[0.28em] text-[var(--accent)] uppercase">
@@ -1776,6 +2412,13 @@ export default function App() {
                       </p>
                     </div>
                     <span className="chip accent-chip">{currentModeLabel}</span>
+                  </div>
+
+                  <div className="workspace-entry-card__glass-note">
+                    <span className="workspace-entry-card__glass-badge">玻璃拟态面板</span>
+                    <span className="workspace-entry-card__glass-copy">
+                      这里就是左侧控制面板，已叠加 `backdrop-blur-md + bg-white/30 + border-white/20`
+                    </span>
                   </div>
 
                   <div className="entry-metric-grid">
@@ -1854,14 +2497,43 @@ export default function App() {
                     ))}
                   </div>
 
-                  <div className="mt-6 flex flex-wrap gap-3">
+                  <div className="workspace-entry-card__action-note">
+                    <p className="workspace-entry-card__action-label">下一步</p>
+                    <p className="workspace-entry-card__action-copy">
+                      {activeBoard === "existing_resume"
+                        ? "先进入资料录入补齐岗位信息和原始简历，再从这里直接启动流式优化。"
+                        : "先进入资料录入完善岗位与候选人素材，再从这里直接启动简历生成。"}
+                    </p>
+                  </div>
+
+                  <div className="workspace-entry-card__action-row">
                     <button
                       type="button"
                       onClick={() => handleOpenInfoPage(activeBoard)}
-                      className="pill-button pill-button--primary"
+                      className="pill-button pill-button--ghost workspace-entry-card__action-secondary"
                     >
                       {workspaceEntryButtonLabel}
                     </button>
+                    <button
+                      type="button"
+                      onClick={handlePrimaryWorkspaceAction}
+                      disabled={primaryWorkspaceActionDisabled}
+                      className="pill-button pill-button--primary workspace-entry-card__action-primary"
+                    >
+                      {primaryWorkspaceActionLabel}
+                    </button>
+                  </div>
+
+                  <div className="workspace-entry-card__action-stack">
+                    {liveStreamState.active && liveStreamState.board === activeBoard ? (
+                      <button
+                        type="button"
+                        onClick={() => liveStreamAbortRef.current?.abort?.()}
+                        className="pill-button pill-button--ghost"
+                      >
+                        停止生成
+                      </button>
+                    ) : null}
                     {hasPendingQuestionsForActiveBoard ? (
                       <button
                         type="button"

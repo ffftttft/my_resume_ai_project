@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import List
@@ -43,6 +44,12 @@ def _build_download_filename(file_name: str) -> str:
     safe_ascii = f"{safe_stem}{safe_suffix}"
     encoded = quote(original_name, safe="")
     return f'attachment; filename="{safe_ascii}"; filename*=UTF-8\'\'{encoded}'
+
+
+def _encode_sse(event: str, payload: dict) -> str:
+    """Serialize one server-sent event frame."""
+
+    return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
 def get_resume_service() -> ResumeService:
@@ -222,6 +229,23 @@ def generate_resume(
     return ApiEnvelope(data=result)
 
 
+@router.post("/resume/generate/stream")
+def stream_generate_resume(
+    payload: GenerateResumeRequest,
+    service: ResumeService = Depends(get_resume_service),
+) -> StreamingResponse:
+    """Stream structured events for new resume generation."""
+
+    def event_stream():
+        for event in service.stream_generate_resume(payload.profile):
+            yield _encode_sse(event.get("event", "message"), event.get("data") or {})
+
+    response = StreamingResponse(event_stream(), media_type="text/event-stream")
+    response.headers["Cache-Control"] = "no-cache"
+    response.headers["X-Accel-Buffering"] = "no"
+    return response
+
+
 @router.post("/resume/revise", response_model=ApiEnvelope)
 def revise_resume(
     payload: ReviseResumeRequest,
@@ -246,6 +270,23 @@ def optimize_existing_resume(
 
     result = service.optimize_existing_resume(payload.model_dump())
     return ApiEnvelope(data=result)
+
+
+@router.post("/resume/existing/stream")
+def stream_existing_resume(
+    payload: ExistingResumeOptimizeRequest,
+    service: ResumeService = Depends(get_resume_service),
+) -> StreamingResponse:
+    """Stream structured optimization events for an uploaded resume."""
+
+    def event_stream():
+        for event in service.stream_existing_resume(payload.model_dump()):
+            yield _encode_sse(event.get("event", "message"), event.get("data") or {})
+
+    response = StreamingResponse(event_stream(), media_type="text/event-stream")
+    response.headers["Cache-Control"] = "no-cache"
+    response.headers["X-Accel-Buffering"] = "no"
+    return response
 
 
 @router.post("/resume/snapshot/save", response_model=ApiEnvelope)

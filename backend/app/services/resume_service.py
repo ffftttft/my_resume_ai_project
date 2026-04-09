@@ -5,7 +5,7 @@ from __future__ import annotations
 from io import BytesIO
 from typing import Dict
 
-from ai_modules.engine_v2 import ResumeAIEngine
+from ai_modules.engine_v3 import ResumeAIEngine
 from app.models import UserProfile
 
 from .memory_service import MemoryService
@@ -126,10 +126,80 @@ class ResumeService:
         )
         return result
 
+    def stream_existing_resume(self, payload: Dict):
+        """Stream uploaded-resume optimization events and register the final result."""
+
+        for event in self.ai_engine.stream_existing_resume(payload):
+            if event.get("event") == "final":
+                result = event.get("data") or {}
+                profile_memory = self.profile_memory_service.sync_from_profile(
+                    {
+                        "basic_info": {
+                            "target_company": payload.get("target_company", ""),
+                            "target_role": payload.get("target_role", ""),
+                            "job_requirements": payload.get("job_requirements", ""),
+                            "city": "",
+                        },
+                        "skills": [],
+                        "education": [],
+                        "projects": [],
+                        "experiences": [],
+                        "use_full_information": False,
+                    },
+                    workflow="existing_resume",
+                )
+                self.ai_engine.update_persistent_profile_memory(profile_memory.get("profile") or {})
+                self.memory_service.register_generation(
+                    {
+                        "event": "existing_resume_streamed",
+                        "title": result.get("title") or payload.get("target_role") or "流式简历优化",
+                        "target_company": payload.get("target_company", ""),
+                        "target_role": payload.get("target_role", ""),
+                        "resume_text": result.get("resume_text", ""),
+                        "generation_mode": result.get("mode", "fallback"),
+                        "used_ai": result.get("used_ai", False),
+                        "needs_clarification": result.get("needs_clarification", False),
+                    }
+                )
+            yield event
+
     def save_resume_snapshot(self, payload: Dict) -> Dict:
         """Save the current left-side resume editor content as a snapshot."""
 
         return self.memory_service.save_resume_snapshot(payload)
+
+    def stream_generate_resume(self, profile: UserProfile):
+        """Stream new-resume generation events and register the final result."""
+
+        profile_payload = profile.model_dump()
+        for event in self.ai_engine.stream_generate_resume(profile_payload):
+            if event.get("event") == "final":
+                result = event.get("data") or {}
+                profile_memory = self.profile_memory_service.sync_from_profile(
+                    profile_payload,
+                    workflow="greenfield",
+                )
+                self.ai_engine.update_persistent_profile_memory(profile_memory.get("profile") or {})
+                for module in profile.modules:
+                    self.memory_service.ensure_generated_module(
+                        module_name=f"resume_module::{module}",
+                        category="resume_module",
+                        path=f"generated::{module}",
+                        details=f"Generated or refreshed resume module: {module}",
+                    )
+                self.memory_service.register_generation(
+                    {
+                        "event": "resume_streamed",
+                        "title": result.get("title", profile.basic_info.name or "未命名简历"),
+                        "target_company": getattr(profile.basic_info, "target_company", ""),
+                        "target_role": profile.basic_info.target_role,
+                        "resume_text": result.get("resume_text", ""),
+                        "generation_mode": result.get("mode", "fallback"),
+                        "used_ai": result.get("used_ai", False),
+                        "needs_clarification": result.get("needs_clarification", False),
+                    }
+                )
+            yield event
 
     def generate_resume(self, profile: UserProfile) -> Dict:
         """Create a resume draft and register each selected module in memory."""

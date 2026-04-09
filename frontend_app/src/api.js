@@ -1,9 +1,11 @@
 // REST API helpers for talking to the local FastAPI backend.
 
+import { parseWorkspaceResult } from "./schemas/resume";
+
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") || "http://127.0.0.1:8000";
 
-async function parseJsonResponse(response) {
+async function parseJsonResponse(response, parser) {
   let payload = null;
 
   try {
@@ -22,7 +24,7 @@ async function parseJsonResponse(response) {
     throw new Error(detailMessage || payload?.message || "Request failed.");
   }
 
-  return payload.data;
+  return parser ? parser(payload.data) : payload.data;
 }
 
 function extractFileNameFromDisposition(disposition, fallback = "resume.md") {
@@ -164,7 +166,7 @@ export async function generateResume(payload) {
     },
     body: JSON.stringify(payload),
   });
-  return parseJsonResponse(response);
+  return parseJsonResponse(response, parseWorkspaceResult);
 }
 
 export async function reviseResume(payload) {
@@ -175,7 +177,7 @@ export async function reviseResume(payload) {
     },
     body: JSON.stringify(payload),
   });
-  return parseJsonResponse(response);
+  return parseJsonResponse(response, parseWorkspaceResult);
 }
 
 export async function optimizeExistingResume(payload) {
@@ -186,7 +188,7 @@ export async function optimizeExistingResume(payload) {
     },
     body: JSON.stringify(payload),
   });
-  return parseJsonResponse(response);
+  return parseJsonResponse(response, parseWorkspaceResult);
 }
 
 export async function saveResumeSnapshot(payload) {
