@@ -35,12 +35,13 @@ router = APIRouter(prefix="/api", tags=["resume"])
 def _build_download_filename(file_name: str) -> str:
     """Return an RFC 5987 compatible Content-Disposition value."""
 
-    file_path = Path(file_name or "resume")
+    original_name = Path(file_name or "resume").name or "resume"
+    file_path = Path(original_name)
     safe_stem = re.sub(r"[^A-Za-z0-9_-]+", "_", file_path.stem or "resume")
     safe_stem = re.sub(r"_+", "_", safe_stem).strip("._") or "resume"
     safe_suffix = file_path.suffix if re.fullmatch(r"\.[A-Za-z0-9]+", file_path.suffix or "") else ""
     safe_ascii = f"{safe_stem}{safe_suffix}"
-    encoded = quote(file_name or "resume")
+    encoded = quote(original_name, safe="")
     return f'attachment; filename="{safe_ascii}"; filename*=UTF-8\'\'{encoded}'
 
 
@@ -95,6 +96,13 @@ def read_memory(memory_service: MemoryService = Depends(get_memory_service)) -> 
     """Return the current memory.json content to the frontend."""
 
     return ApiEnvelope(data={"memory": memory_service.load()})
+
+
+@router.post("/session/reset", response_model=ApiEnvelope)
+def reset_ai_session(service: ResumeService = Depends(get_resume_service)) -> ApiEnvelope:
+    """Reset the transient AI session and reload the compact persistent user profile memory."""
+
+    return ApiEnvelope(data=service.reset_ai_session_context())
 
 
 @router.post("/workspace/save", response_model=ApiEnvelope)

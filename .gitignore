@@ -23,5 +23,6 @@ backend/.env
 frontend/.env
 frontend_app/.env
 memory.json
+profile_memory.json
 tmp_*.html
 tmp_*.js

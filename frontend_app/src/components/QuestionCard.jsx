@@ -1,4 +1,3 @@
-// Modal card for AI-generated clarification questions triggered after resume generation.
 import React, { useEffect, useMemo, useState } from "react";
 
 function createTypedQuestions(questions) {
@@ -23,6 +22,12 @@ export default function QuestionCard({
 
   useEffect(() => {
     if (!open) return undefined;
+
+    const prefersReducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+    if (prefersReducedMotion) {
+      setTypedQuestions(questions);
+      return undefined;
+    }
 
     setTypedQuestions(createTypedQuestions(questions));
 
@@ -60,34 +65,41 @@ export default function QuestionCard({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/32 p-4 backdrop-blur-sm">
-      <div className="paper-panel-strong float-card flex max-h-[88vh] w-full max-w-4xl flex-col p-6">
-        <div className="mb-4 flex items-start justify-between gap-4">
+    <div className="dialog-shell">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="question-dialog-title"
+        aria-describedby="question-dialog-description"
+        className="paper-panel-strong float-card question-dialog-shell"
+      >
+        <div className="question-dialog-shell__header">
           <div>
-            <p className="text-sm font-semibold tracking-[0.28em] text-[var(--accent)] uppercase">
-              AI Follow-up
+            <p className="question-dialog-shell__eyebrow">AI Follow-up</p>
+            <h2 id="question-dialog-title" className="question-dialog-shell__title">
+              {title}
+            </h2>
+            <p id="question-dialog-description" className="question-dialog-shell__description">
+              {description}
             </p>
-            <h2 className="mt-2 text-2xl font-semibold text-[var(--ink)]">{title}</h2>
-            <p className="mt-2 text-sm text-[var(--muted)]">{description}</p>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-full border border-slate-300 px-3 py-1 text-sm text-slate-600 transition hover:border-slate-500 hover:text-slate-900"
-          >
+          <button type="button" onClick={onClose} className="question-dialog-shell__close">
             关闭
           </button>
         </div>
 
-        <div className="flex-1 space-y-4 overflow-y-auto pr-1">
+        <div className="question-dialog-shell__body">
           {questions.map((question, index) => (
-            <div key={question} className="rounded-3xl border border-slate-200 bg-white/75 p-4">
-              <p className="mb-3 text-sm font-semibold leading-7 text-[var(--ink)]">
-                Q{index + 1}. {typedQuestions[index] || ""}
-                {(typedQuestions[index] || "").length < question.length && (
-                  <span className="ml-1 inline-block h-4 w-[1px] animate-pulse bg-[var(--accent)] align-middle" />
-                )}
-              </p>
+            <div key={question} className="question-block">
+              <div className="question-block__head">
+                <span className="question-block__index">{String(index + 1).padStart(2, "0")}</span>
+                <p className="question-block__title">
+                  {typedQuestions[index] || ""}
+                  {(typedQuestions[index] || "").length < question.length ? (
+                    <span className="question-block__cursor" />
+                  ) : null}
+                </p>
+              </div>
               <textarea
                 value={answers[question] || ""}
                 onChange={(event) => onAnswerChange(question, event.target.value)}
@@ -99,27 +111,23 @@ export default function QuestionCard({
           ))}
         </div>
 
-        <div className="mt-6 flex flex-wrap justify-end gap-3">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-500"
-          >
+        <div className="question-dialog-shell__actions">
+          <button type="button" onClick={onClose} className="question-dialog-shell__secondary">
             稍后处理
           </button>
           <button
             type="button"
             onClick={onSkip}
             disabled={loading}
-            className="rounded-full bg-white px-4 py-2 text-sm font-semibold text-[var(--ink)] transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            className="question-dialog-shell__secondary"
           >
-            跳过补充，直接使用当前版本
+            跳过补充，保留当前版本
           </button>
           <button
             type="button"
             onClick={onSubmit}
             disabled={loading}
-            className="rounded-full bg-[var(--accent)] px-5 py-2 text-sm font-semibold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
+            className="question-dialog-shell__primary"
           >
             {loading ? "更新中..." : "提交并重新生成"}
           </button>

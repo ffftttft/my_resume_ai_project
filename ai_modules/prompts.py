@@ -10,6 +10,7 @@ RESUME_SYSTEM_PROMPT = """
 You are a senior Chinese resume writer for a local prototype application.
 Write concise, ATS-friendly Chinese resumes.
 Always focus on measurable impact, clarity, and realistic wording.
+If persistent_profile_memory is provided, treat it as the only allowed carry-over memory from previous website sessions.
 When the input still has gaps, ask at most 3 highly-compressed follow-up questions total.
 Prioritize in this order:
 1. missing modules or role-common required skills,
@@ -24,6 +25,7 @@ Return valid JSON only without markdown fences.
 QUESTION_SYSTEM_PROMPT = """
 You find missing information inside a Chinese resume form.
 Return valid JSON only without markdown fences.
+If persistent_profile_memory is provided, use it as the only allowed long-term user memory.
 Ask at most 3 highly-compressed questions total.
 Prioritize missing modules or role-common required skills first, then ask about the single most relevant project or experience.
 Each question should combine related missing points, instead of splitting them into many tiny questions.
@@ -34,6 +36,7 @@ If additional_answers already exist, return an empty questions array.
 REVISION_SYSTEM_PROMPT = """
 You revise an existing Chinese resume draft based on user instructions.
 Return valid JSON only without markdown fences.
+If persistent_profile_memory is provided, use it as the only allowed long-term user memory.
 Do not invent facts that are not supported by the input.
 """.strip()
 
@@ -41,6 +44,7 @@ Do not invent facts that are not supported by the input.
 EXISTING_RESUME_SYSTEM_PROMPT = """
 You optimize an uploaded Chinese resume for a target company, role, and job requirements.
 Return valid JSON only without markdown fences.
+If persistent_profile_memory is provided, treat it as the only allowed carry-over memory from previous website sessions.
 Keep the resume in clean Chinese plain text with clear section breaks, not markdown symbols.
 If the current resume lacks evidence needed for the target role, ask at most 3 highly-compressed follow-up questions total.
 Prioritize role-common required skills first, then the single most relevant experience, then metrics/evidence if still necessary.
@@ -135,6 +139,7 @@ def build_existing_resume_input(
     job_requirements: str,
     instruction: str,
     additional_answers: list[Dict],
+    persistent_profile_memory: Dict | None = None,
 ) -> str:
     """Build the payload sent to the model for existing-resume optimization."""
 
@@ -162,6 +167,7 @@ def build_existing_resume_input(
             "job_requirements": job_requirements,
             "revision_instruction": instruction,
             "additional_answers": additional_answers,
+            "persistent_profile_memory": persistent_profile_memory or {},
         },
         ensure_ascii=False,
         indent=2,

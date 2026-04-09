@@ -1,4 +1,3 @@
-// Main frontend page that wires together the form, preview, question modal, and memory history.
 import React, { useEffect, useRef, useState } from "react";
 
 import {
@@ -13,17 +12,18 @@ import {
   optimizeExistingResume,
   previewUploadedFile,
   reviseResume,
+  resetAiSession,
   saveResumeSnapshot,
   saveWorkspaceDraft,
   uploadFiles,
 } from "./api";
 import ExistingResumePanel from "./components/ExistingResumePanel";
+import ExistingResumePreview from "./components/ExistingResumePreview";
+import GreenfieldResumePreview from "./components/GreenfieldResumePreview";
 import HistoryCard from "./components/HistoryCard";
-import ModelMonitorCard from "./components/ModelMonitorCard";
 import ModeSelectionDialog from "./components/ModeSelectionDialog";
 import QuestionCard from "./components/QuestionCard";
 import RecordPreviewDialog from "./components/RecordPreviewDialog";
-import ResumePreview from "./components/ResumePreview";
 import UserFormPanel from "./components/UserFormPanel";
 
 function createEmptyEducation() {
@@ -69,7 +69,58 @@ function cloneFormState(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-const INITIAL_FORM_STATE = {
+function createEmptyResumeWorkspace() {
+  return {
+    title: "",
+    resume_text: "",
+    analysis_notes: [],
+    generation_mode: "fallback",
+    revision_instruction: "",
+  };
+}
+
+function createEmptyExistingResumeInput() {
+  return {
+    target_company: "",
+    target_role: "",
+    job_requirements: "",
+    resume_source_text: "",
+    resume_source_name: "",
+    additional_answers: [],
+  };
+}
+
+const MEMBERSHIP_LEVEL_LABELS = Object.freeze({
+  basic: "普通用户",
+  advanced: "高级用户",
+});
+
+const BILLING_MODE_LABELS = Object.freeze({
+  usage: "按量付费",
+  buyout: "买断付费",
+});
+
+const MOCK_ACCOUNT_ENTITLEMENTS = Object.freeze({
+  membership_level: "advanced",
+  balance: 128.6,
+  points: 2480,
+  billing_mode: "usage",
+  supported_billing_modes: ["usage", "buyout"],
+});
+
+const BOARD_LABELS = Object.freeze({
+  greenfield: "新建简历",
+  existing_resume: "现有简历优化",
+});
+
+function withAssignedMembershipLevel(formState) {
+  return {
+    ...cloneFormState(formState),
+    membership_level: MOCK_ACCOUNT_ENTITLEMENTS.membership_level,
+  };
+}
+
+const INITIAL_GREENFIELD_FORM_STATE = {
   basic_info: {
     name: "",
     target_company: "",
@@ -85,31 +136,51 @@ const INITIAL_FORM_STATE = {
   projects: [createEmptyProject()],
   experiences: [createEmptyExperience()],
   modules: ["summary", "skills", "education", "projects", "experience", "attachments"],
-  membership_level: "basic",
+  membership_level: MOCK_ACCOUNT_ENTITLEMENTS.membership_level,
   use_full_information: false,
   uploaded_context: "",
   additional_answers: [],
 };
 
+const MODEL_MONITOR_REFRESH_MS = 5 * 60 * 1000;
+const WORKSPACE_AUTOSAVE_MS = 30 * 1000;
+
+const REQUIRED_JOB_FIELD_LABELS = Object.freeze({
+  target_company: "目标公司",
+  target_role: "目标岗位",
+  job_requirements: "岗位要求",
+});
+
+const GENERIC_JOB_INFO = Object.freeze({
+  target_company: "通用公司",
+  target_role: "通用岗位",
+  job_requirements:
+    "通用招聘要求：突出与目标岗位相关的通用技能、项目成果、量化结果、协作能力与学习能力。",
+});
+
 function splitTextList(text) {
-  return text
-    .split(/[\n,，]/)
+  return (text || "")
+    .split(/[\n,，、]/)
     .map((item) => item.trim())
     .filter(Boolean);
 }
 
 function parseDuration(duration) {
-  const cleaned = duration.replace(/[—~]/g, "至");
+  const cleaned = (duration || "").replace(/[—–~～]/g, "至");
   const [start = "", end = ""] = cleaned.split("至").map((item) => item.trim());
   return { start_date: start, end_date: end };
 }
 
 function hasContent(item) {
-  return Object.values(item).some((value) => typeof value === "string" && value.trim());
+  return Object.values(item || {}).some((value) => typeof value === "string" && value.trim());
+}
+
+function countFilledItems(items) {
+  return (items || []).filter(hasContent).length;
 }
 
 function toEducationPayload(items) {
-  return items
+  return (items || [])
     .filter(hasContent)
     .map((item) => {
       const { start_date, end_date } = parseDuration(item.duration);
@@ -125,7 +196,7 @@ function toEducationPayload(items) {
 }
 
 function toProjectPayload(items) {
-  return items
+  return (items || [])
     .filter(hasContent)
     .map((item) => {
       const { start_date, end_date } = parseDuration(item.duration);
@@ -143,7 +214,7 @@ function toProjectPayload(items) {
 }
 
 function toExperiencePayload(items) {
-  return items
+  return (items || [])
     .filter(hasContent)
     .map((item) => {
       const { start_date, end_date } = parseDuration(item.duration);
@@ -160,7 +231,7 @@ function toExperiencePayload(items) {
 }
 
 function buildScopedAttachmentContext(formState) {
-  return [...formState.projects, ...formState.experiences]
+  return [...(formState.projects || []), ...(formState.experiences || [])]
     .map((item) => item.attachment_context || "")
     .filter(Boolean)
     .join("\n\n");
@@ -186,7 +257,7 @@ function buildProfilePayload(formState) {
     membership_level: formState.membership_level,
     use_full_information: formState.use_full_information,
     uploaded_context: buildScopedAttachmentContext(formState),
-    additional_answers: formState.additional_answers.filter((item) => item.answer.trim()),
+    additional_answers: (formState.additional_answers || []).filter((item) => item?.answer?.trim()),
   };
 }
 
@@ -222,13 +293,10 @@ function normalizeResumeText(text) {
 }
 
 function buildResumeSnapshotTitle(targetCompany, targetRole) {
-  return [targetCompany?.trim(), targetRole?.trim()].filter(Boolean).join("｜");
+  return [targetCompany?.trim(), targetRole?.trim()].filter(Boolean).join(" - ");
 }
 
-function buildWorkspaceDraftPayload({
-  formState,
-  source = "manual",
-}) {
+function buildWorkspaceDraftPayload({ formState, source = "manual" }) {
   return {
     form_state: cloneFormState(formState),
     source,
@@ -262,20 +330,6 @@ function buildRecordPreviewState(overrides = {}) {
   };
 }
 
-const MODEL_MONITOR_REFRESH_MS = 5 * 60 * 1000;
-const WORKSPACE_AUTOSAVE_MS = 30 * 1000;
-const REQUIRED_JOB_FIELD_LABELS = Object.freeze({
-  target_company: "公司",
-  target_role: "岗位名称",
-  job_requirements: "招聘要求",
-});
-const GENERIC_JOB_INFO = Object.freeze({
-  target_company: "通用公司",
-  target_role: "通用岗位",
-  job_requirements:
-    "通用招聘要求：突出与目标岗位相关的通用技术能力、项目成果、量化结果、沟通协作与学习能力。",
-});
-
 function hasRequiredJobInfo(jobInfo) {
   return Object.keys(REQUIRED_JOB_FIELD_LABELS).every((field) => jobInfo?.[field]?.trim());
 }
@@ -289,53 +343,69 @@ function getRequiredJobInfoError(jobInfo) {
     return "";
   }
 
-  return `请先填写${missingEntry[1]}，该项为必填；也可以点击“使用通用选项”。`;
+  return `请先填写${missingEntry[1]}。如果只是先测试流程，也可以点击“套用通用岗位模板”。`;
 }
 
 function getBoardIntroStatus(board) {
   return board === "existing_resume"
-    ? "请先上传现有简历，并填写公司、岗位名称和招聘要求后开始优化。"
-    : "请先填写公司、岗位名称和招聘要求，再补充个人信息后生成简历。";
+    ? "上传现有简历并按目标岗位要求执行优化。"
+    : "完善岗位信息与候选人资料后生成新简历。";
+}
+
+function buildQuestionCardCopy(mode) {
+  if (mode === "existing_resume") {
+    return {
+      title: "为了继续按岗优化，还需要你补充几项信息",
+      description: "补充回答后，系统会继续围绕目标岗位优化当前简历。",
+      placeholder: "请输入与岗位匹配、项目成果、量化结果或相关经历有关的补充信息...",
+    };
+  }
+
+  return {
+    title: "为了继续生成新简历，还需要你补充几项信息",
+    description: "补充回答后，系统会重新生成简历，并整合新增信息。",
+    placeholder: "请输入更具体的职责、动作、结果或量化数据...",
+  };
 }
 
 export default function App() {
   const [activeBoard, setActiveBoard] = useState("greenfield");
+  const [activeInfoPage, setActiveInfoPage] = useState(null);
   const [modeDialogOpen, setModeDialogOpen] = useState(true);
-  const [formState, setFormState] = useState(() => cloneFormState(INITIAL_FORM_STATE));
-  const [existingResumeSourceText, setExistingResumeSourceText] = useState("");
-  const [existingResumeSourceName, setExistingResumeSourceName] = useState("");
-  const [existingJobInfo, setExistingJobInfo] = useState({
-    target_company: "",
-    target_role: "",
-    job_requirements: "",
-  });
-  const [existingAdditionalAnswers, setExistingAdditionalAnswers] = useState([]);
-  const [resumeTitle, setResumeTitle] = useState("");
-  const [resumeText, setResumeText] = useState("");
-  const [analysisNotes, setAnalysisNotes] = useState([]);
-  const [generationMode, setGenerationMode] = useState("fallback");
+  const [greenfieldFormState, setGreenfieldFormState] = useState(() =>
+    cloneFormState(INITIAL_GREENFIELD_FORM_STATE),
+  );
+  const [existingFormState, setExistingFormState] = useState(() => createEmptyExistingResumeInput());
+  const [greenfieldWorkspace, setGreenfieldWorkspace] = useState(() => createEmptyResumeWorkspace());
+  const [existingResumeWorkspace, setExistingResumeWorkspace] = useState(() =>
+    createEmptyResumeWorkspace(),
+  );
   const [memory, setMemory] = useState(null);
   const [backendStatus, setBackendStatus] = useState(null);
-  const [statusText, setStatusText] = useState("正在连接本地后端并读取 memory.json ...");
+  const [statusText, setStatusText] = useState("正在连接本地服务并加载工作区...");
   const [loadingAction, setLoadingAction] = useState("");
   const [questionsOpen, setQuestionsOpen] = useState(false);
   const [questions, setQuestions] = useState([]);
   const [questionAnswers, setQuestionAnswers] = useState({});
   const [questionFlowMode, setQuestionFlowMode] = useState("greenfield");
-  const [revisionInstruction, setRevisionInstruction] = useState("");
   const [modelStatus, setModelStatus] = useState(null);
   const [modelStatusLoading, setModelStatusLoading] = useState(false);
   const [draftSaving, setDraftSaving] = useState(false);
   const [draftSaveStatus, setDraftSaveStatus] = useState("");
   const [workspaceReady, setWorkspaceReady] = useState(false);
   const [recordPreview, setRecordPreview] = useState(() => buildRecordPreviewState());
+  const [sessionUsername, setSessionUsername] = useState("ft");
 
   const lastSavedDraftHashRef = useRef("");
   const draftSaveInFlightRef = useRef(false);
 
   const loading = Boolean(loadingAction);
-  const greenfieldJobInfoReady = hasRequiredJobInfo(formState.basic_info);
-  const existingJobInfoReady = hasRequiredJobInfo(existingJobInfo);
+  const greenfieldJobInfoReady = hasRequiredJobInfo(greenfieldFormState.basic_info);
+  const existingJobInfoReady = hasRequiredJobInfo(existingFormState);
+  const activeWorkspace =
+    activeBoard === "existing_resume" ? existingResumeWorkspace : greenfieldWorkspace;
+  const activeJobInfo =
+    activeBoard === "existing_resume" ? existingFormState : greenfieldFormState.basic_info;
 
   async function refreshMemory() {
     const data = await fetchMemory();
@@ -346,21 +416,57 @@ export default function App() {
     setRecordPreview(buildRecordPreviewState());
   }
 
+  function updateWorkspace(board, updater) {
+    if (board === "existing_resume") {
+      setExistingResumeWorkspace((previous) =>
+        typeof updater === "function" ? updater(previous) : updater,
+      );
+      return;
+    }
+
+    setGreenfieldWorkspace((previous) =>
+      typeof updater === "function" ? updater(previous) : updater,
+    );
+  }
+
+  function applyWorkspaceResult(board, result) {
+    updateWorkspace(board, (previous) => ({
+      ...previous,
+      title:
+        result.title || (board === "existing_resume" ? "优化版简历草稿" : "新建简历草稿"),
+      resume_text: normalizeResumeText(result.resume_text || ""),
+      analysis_notes: result.analysis_notes || [],
+      generation_mode: result.mode || previous.generation_mode || "fallback",
+    }));
+  }
+
+  function setQuestionDrafts(nextQuestions) {
+    setQuestions(nextQuestions);
+    setQuestionAnswers((previous) =>
+      Object.fromEntries(nextQuestions.map((question) => [question, previous[question] || ""])),
+    );
+  }
+
+  function applyResult(board, result, successMessage) {
+    applyWorkspaceResult(board, result);
+    if ((result.questions || []).length > 0) {
+      setQuestionDrafts(result.questions);
+    } else {
+      setQuestions([]);
+      setQuestionAnswers({});
+      setQuestionsOpen(false);
+    }
+    setStatusText(successMessage);
+  }
+
   function handleSwitchBoard(nextBoard) {
     if (nextBoard === activeBoard) return;
 
     setActiveBoard(nextBoard);
+    setActiveInfoPage(null);
     setQuestionsOpen(false);
-    setQuestions([]);
-    setQuestionAnswers({});
-    setQuestionFlowMode(nextBoard);
-    setRevisionInstruction("");
     closeRecordPreview();
-    setStatusText(
-      nextBoard === "existing_resume"
-        ? "上传已有简历并填写岗位信息后，AI 会先按岗位优化，再针对缺失信息继续追问。"
-        : "填写个人信息后点击“AI生成简历”，系统会先生成草稿，再追问缺失细节。",
-    );
+    setStatusText(getBoardIntroStatus(nextBoard));
   }
 
   function handleModeSelection(nextBoard) {
@@ -373,38 +479,47 @@ export default function App() {
     setModeDialogOpen(false);
   }
 
-  function applyGenericJobInfoToGreenfield() {
-    setFormState((previous) => ({
+  function handleOpenInfoPage(board = activeBoard) {
+    setActiveBoard(board);
+    setActiveInfoPage(board);
+    setQuestionsOpen(false);
+    closeRecordPreview();
+  }
+
+  function handleCloseInfoPage() {
+    setActiveInfoPage(null);
+  }
+
+  function applyGenericJobInfo(board = activeBoard) {
+    if (board === "existing_resume") {
+      setExistingFormState((previous) => ({
+        ...previous,
+        ...GENERIC_JOB_INFO,
+      }));
+      setStatusText("已填入标准岗位模板，你仍可继续手动调整。");
+      return;
+    }
+
+    setGreenfieldFormState((previous) => ({
       ...previous,
       basic_info: {
         ...previous.basic_info,
         ...GENERIC_JOB_INFO,
       },
     }));
-    setStatusText("已填入通用公司、岗位名称和招聘要求，你也可以继续手动修改。");
-  }
-
-  function applyGenericJobInfoToExisting() {
-    setExistingJobInfo((previous) => ({
-      ...previous,
-      ...GENERIC_JOB_INFO,
-    }));
-    setStatusText("已填入通用公司、岗位名称和招聘要求，你也可以继续手动修改。");
+    setStatusText("已填入标准岗位模板，你仍可继续手动调整。");
   }
 
   function createCurrentWorkspaceDraft(source = "manual") {
     return buildWorkspaceDraftPayload({
-      formState,
+      formState: greenfieldFormState,
       source,
     });
   }
 
   function restoreWorkspaceDraft(draft) {
-    if (!draft) return;
-
-    if (draft.form_state) {
-      setFormState(cloneFormState(draft.form_state));
-    }
+    if (!draft?.form_state) return;
+    setGreenfieldFormState(withAssignedMembershipLevel(draft.form_state));
   }
 
   async function persistWorkspaceDraft({ silent = false, source = "manual" } = {}) {
@@ -422,35 +537,34 @@ export default function App() {
     const payload = createCurrentWorkspaceDraft(source);
     const draftHash = JSON.stringify({ ...payload, source: undefined });
     const emptyHash = JSON.stringify({
-      ...buildWorkspaceDraftPayload({
-        formState: INITIAL_FORM_STATE,
-      }),
+      ...buildWorkspaceDraftPayload({ formState: INITIAL_GREENFIELD_FORM_STATE }),
       source: undefined,
     });
 
     if (draftHash === emptyHash) {
       if (!silent) {
-        setDraftSaveStatus("当前还没有可保存的信息。");
+        setDraftSaveStatus("当前还没有可保存的资料。");
       }
       return false;
     }
 
     if (draftHash === lastSavedDraftHashRef.current) {
       if (!silent) {
-        setDraftSaveStatus("当前内容已经是最新保存版本。");
+        setDraftSaveStatus("当前资料已经是最新保存版本。");
       }
       return false;
     }
 
     setDraftSaving(true);
     draftSaveInFlightRef.current = true;
+
     try {
       const result = await saveWorkspaceDraft(payload);
       lastSavedDraftHashRef.current = draftHash;
       const savedAt = result.saved_at ? new Date(result.saved_at).toLocaleTimeString() : "刚刚";
       setDraftSaveStatus(source === "autosave" ? `已自动保存 ${savedAt}` : `已手动保存 ${savedAt}`);
       if (!silent) {
-        setStatusText("当前填写的个人信息已保存到本地。");
+        setStatusText("当前资料已保存到本地草稿。");
       }
       await refreshMemory();
       return true;
@@ -502,28 +616,31 @@ export default function App() {
   useEffect(() => {
     async function bootstrap() {
       try {
+        const sessionPayload = await resetAiSession();
+        setSessionUsername(sessionPayload.username || "ft");
+
         const [health, memoryPayload] = await Promise.all([fetchHealth(), fetchMemory()]);
         setBackendStatus(health);
         setMemory(memoryPayload.memory);
-        setStatusText("本地后端已连接，点击“AI生成简历”后会自动针对项目和实习经历发起追问。");
+        setStatusText("本地服务已连接，当前工作区已就绪。");
 
         const savedDraft = memoryPayload.memory?.workspace_draft;
-        if (savedDraft) {
+        if (savedDraft?.form_state) {
+          const restoredDraftFormState = withAssignedMembershipLevel(savedDraft.form_state);
           restoreWorkspaceDraft(savedDraft);
           lastSavedDraftHashRef.current = JSON.stringify({
             ...buildWorkspaceDraftPayload({
-              formState: savedDraft.form_state || INITIAL_FORM_STATE,
+              formState: restoredDraftFormState,
             }),
             source: undefined,
           });
           setDraftSaveStatus(
             savedDraft.saved_at
-              ? `已恢复 ${new Date(savedDraft.saved_at).toLocaleString()} 保存的内容`
-              : "已恢复上次保存的内容",
+              ? `已恢复 ${new Date(savedDraft.saved_at).toLocaleString()} 保存的资料草稿`
+              : "已恢复最近一次保存的资料草稿",
           );
-          setStatusText("已恢复最近一次保存的个人信息备份。");
         } else {
-          setDraftSaveStatus("个人信息支持手动保存，且会每 30 秒自动保存一次。");
+          setDraftSaveStatus("资料支持手动保存，并会每 30 秒自动保存一次。");
         }
 
         try {
@@ -545,7 +662,7 @@ export default function App() {
           });
         }
       } catch (error) {
-        setStatusText(`后端未连接：${error.message}。请先启动 FastAPI 服务。`);
+        setStatusText(`本地服务未连接：${error.message}。请先启动服务后再试。`);
       } finally {
         setWorkspaceReady(true);
       }
@@ -572,66 +689,10 @@ export default function App() {
     }, WORKSPACE_AUTOSAVE_MS);
 
     return () => window.clearInterval(timer);
-  }, [
-    formState,
-    backendStatus,
-    workspaceReady,
-  ]);
+  }, [backendStatus, greenfieldFormState, workspaceReady]);
 
-  function setQuestionDrafts(nextQuestions) {
-    setQuestions(nextQuestions);
-    setQuestionAnswers((previous) =>
-      Object.fromEntries(nextQuestions.map((question) => [question, previous[question] || ""])),
-    );
-  }
-
-  function applyResult(result, successMessage) {
-    setResumeTitle(result.title || "简历草稿");
-    setResumeText(normalizeResumeText(result.resume_text || ""));
-    setAnalysisNotes(result.analysis_notes || []);
-    setGenerationMode(result.mode || "fallback");
-    if ((result.questions || []).length > 0) {
-      setQuestionDrafts(result.questions);
-    } else {
-      setQuestions([]);
-      setQuestionAnswers({});
-      setQuestionsOpen(false);
-    }
-    setStatusText(successMessage);
-  }
-
-  async function generateWithCurrentState(nextFormState, sourceLabel = "简历生成完成") {
-    const requiredJobInfoError = getRequiredJobInfoError(nextFormState.basic_info);
-    if (requiredJobInfoError) {
-      setStatusText(requiredJobInfoError);
-      return;
-    }
-
-    const profile = buildProfilePayload(nextFormState);
-    setLoadingAction("generate");
-
-    try {
-      const result = await generateResume({ profile });
-      applyResult(
-        result,
-        result.needs_clarification
-          ? "简历初稿已生成，同时发现项目或实习信息还不够具体，已弹出补充问题。"
-          : `${sourceLabel}，你可以继续手动修改，或在左侧输入修订要求后发送给AI。`,
-      );
-      setQuestionFlowMode("greenfield");
-      if (result.needs_clarification && (result.questions || []).length > 0) {
-        setQuestionsOpen(true);
-      }
-      await refreshMemory();
-    } catch (error) {
-      setStatusText(`生成失败：${error.message}`);
-    } finally {
-      setLoadingAction("");
-    }
-  }
-
-  function updateBasicInfo(field, value) {
-    setFormState((previous) => ({
+  function updateGreenfieldBasicInfo(field, value) {
+    setGreenfieldFormState((previous) => ({
       ...previous,
       basic_info: {
         ...previous.basic_info,
@@ -640,15 +701,15 @@ export default function App() {
     }));
   }
 
-  function updateExistingJobInfo(field, value) {
-    setExistingJobInfo((previous) => ({
+  function updateExistingField(field, value) {
+    setExistingFormState((previous) => ({
       ...previous,
       [field]: value,
     }));
   }
 
-  function updateListItem(listKey, index, field, value) {
-    setFormState((previous) => ({
+  function updateGreenfieldListItem(listKey, index, field, value) {
+    setGreenfieldFormState((previous) => ({
       ...previous,
       [listKey]: previous[listKey].map((item, currentIndex) =>
         currentIndex === index ? { ...item, [field]: value } : item,
@@ -664,26 +725,58 @@ export default function App() {
           ? createEmptyProject()
           : createEmptyExperience();
 
-    setFormState((previous) => ({
+    setGreenfieldFormState((previous) => ({
       ...previous,
       [listKey]: [...previous[listKey], emptyItem],
     }));
   }
 
   function removeListItem(listKey, index) {
-    setFormState((previous) => ({
+    setGreenfieldFormState((previous) => ({
       ...previous,
       [listKey]: previous[listKey].filter((_, currentIndex) => currentIndex !== index),
     }));
   }
 
   function toggleModule(moduleName) {
-    setFormState((previous) => ({
+    setGreenfieldFormState((previous) => ({
       ...previous,
       modules: previous.modules.includes(moduleName)
         ? previous.modules.filter((item) => item !== moduleName)
         : [...previous.modules, moduleName],
     }));
+  }
+
+  async function generateWithCurrentState(nextFormState, sourceLabel = "简历生成完成") {
+    const requiredJobInfoError = getRequiredJobInfoError(nextFormState.basic_info);
+    if (requiredJobInfoError) {
+      setStatusText(requiredJobInfoError);
+      return;
+    }
+
+    setLoadingAction("generate");
+    try {
+      const result = await generateResume({
+        profile: buildProfilePayload(nextFormState),
+      });
+      applyResult(
+        "greenfield",
+        result,
+        result.needs_clarification
+          ? "新建简历初稿已生成，仍有部分信息待补充。"
+          : `${sourceLabel}，你可以继续手动修改，或补充修订要求后交给 AI。`,
+      );
+      setQuestionFlowMode("greenfield");
+      setActiveInfoPage(null);
+      if (result.needs_clarification && (result.questions || []).length > 0) {
+        setQuestionsOpen(true);
+      }
+      await refreshMemory();
+    } catch (error) {
+      setStatusText(`生成失败：${error.message}`);
+    } finally {
+      setLoadingAction("");
+    }
   }
 
   async function handleScopedUpload(listKey, index, selectedFiles, inputElement) {
@@ -698,7 +791,7 @@ export default function App() {
         throw new Error("上传结果为空。");
       }
 
-      setFormState((previous) => ({
+      setGreenfieldFormState((previous) => ({
         ...previous,
         [listKey]: previous[listKey].map((item, currentIndex) =>
           currentIndex === index
@@ -713,7 +806,10 @@ export default function App() {
             : item,
         ),
       }));
-      setStatusText(`已把附件绑定到当前${listKey === "projects" ? "项目经历" : "实习经历"}。`);
+
+      setStatusText(
+        `已把附件绑定到${listKey === "projects" ? "当前项目经历" : "当前实习 / 工作经历"}。`,
+      );
       await refreshMemory();
     } catch (error) {
       setStatusText(`上传失败：${error.message}`);
@@ -732,9 +828,12 @@ export default function App() {
       const result = await uploadFiles([file]);
       const summary = result.files?.[0];
       const extractedText = summary?.full_text || result.combined_context || "";
-      setExistingResumeSourceText(extractedText);
-      setExistingResumeSourceName(summary?.original_name || file.name || "");
-      setStatusText(`已上传简历 ${summary?.original_name || file.name}，可以继续补充岗位信息后让 AI 优化。`);
+      setExistingFormState((previous) => ({
+        ...previous,
+        resume_source_text: extractedText,
+        resume_source_name: summary?.original_name || file.name || "",
+      }));
+      setStatusText(`已上传简历 ${summary?.original_name || file.name}，现在可以开始优化。`);
       await refreshMemory();
     } catch (error) {
       setStatusText(`上传简历失败：${error.message}`);
@@ -745,12 +844,12 @@ export default function App() {
   }
 
   async function runExistingResumeOptimize({
-    resumeTextInput = existingResumeSourceText,
-    additionalAnswers = existingAdditionalAnswers,
+    resumeTextInput = existingFormState.resume_source_text,
+    additionalAnswers = existingFormState.additional_answers,
     instruction = "",
-    sourceLabel = "岗位优化完成",
+    sourceLabel = "简历优化完成",
   } = {}) {
-    const requiredJobInfoError = getRequiredJobInfoError(existingJobInfo);
+    const requiredJobInfoError = getRequiredJobInfoError(existingFormState);
     if (requiredJobInfoError) {
       setStatusText(requiredJobInfoError);
       return;
@@ -765,26 +864,31 @@ export default function App() {
     try {
       const result = await optimizeExistingResume({
         resume_text: resumeTextInput,
-        target_company: existingJobInfo.target_company,
-        target_role: existingJobInfo.target_role,
-        job_requirements: existingJobInfo.job_requirements,
+        target_company: existingFormState.target_company,
+        target_role: existingFormState.target_role,
+        job_requirements: existingFormState.job_requirements,
         instruction,
         additional_answers: additionalAnswers,
       });
       applyResult(
+        "existing_resume",
         result,
         result.needs_clarification
-          ? "岗位优化初稿已生成，同时发现还有几处信息需要你补充。"
-          : `${sourceLabel}，你可以继续在左侧直接修改，或继续发送给AI。`,
+          ? "优化结果已生成，仍有部分信息待补充。"
+          : `${sourceLabel}，你可以继续直接修改，或继续交给 AI。`,
       );
       setQuestionFlowMode("existing_resume");
-      setExistingAdditionalAnswers(additionalAnswers);
+      setExistingFormState((previous) => ({
+        ...previous,
+        additional_answers: additionalAnswers,
+      }));
+      setActiveInfoPage(null);
       if (result.needs_clarification && (result.questions || []).length > 0) {
         setQuestionsOpen(true);
       }
       await refreshMemory();
     } catch (error) {
-      setStatusText(`岗位优化失败：${error.message}`);
+      setStatusText(`简历优化失败：${error.message}`);
     } finally {
       setLoadingAction("");
     }
@@ -801,26 +905,30 @@ export default function App() {
     setQuestionsOpen(false);
 
     if (questionFlowMode === "existing_resume") {
-      const mergedAnswers = mergeAnswerLists(existingAdditionalAnswers, answeredQuestions);
+      const mergedAnswers = mergeAnswerLists(existingFormState.additional_answers, answeredQuestions);
+      setExistingFormState((previous) => ({
+        ...previous,
+        additional_answers: mergedAnswers,
+      }));
       await runExistingResumeOptimize({
         additionalAnswers: mergedAnswers,
-        sourceLabel: "已根据补充回答更新岗位优化版本",
+        sourceLabel: "已根据补充回答更新优化结果",
       });
       return;
     }
 
     const nextFormState = {
-      ...formState,
-      additional_answers: mergeAnswerLists(formState.additional_answers, answeredQuestions),
+      ...greenfieldFormState,
+      additional_answers: mergeAnswerLists(greenfieldFormState.additional_answers, answeredQuestions),
     };
 
-    setFormState(nextFormState);
+    setGreenfieldFormState(nextFormState);
     await generateWithCurrentState(nextFormState, "已根据补充回答更新简历");
   }
 
   function handleSkipQuestions() {
     setQuestionsOpen(false);
-    setStatusText("已跳过补充问题，保留当前草稿。你可以继续手动修改、导出，或之后重新生成。");
+    setStatusText("已跳过补充问题，保留当前结果。你可以之后再继续追问。");
   }
 
   async function handleSaveWorkspace() {
@@ -828,68 +936,62 @@ export default function App() {
   }
 
   function handleClearGreenfieldInfo() {
-    setFormState(cloneFormState(INITIAL_FORM_STATE));
+    setGreenfieldFormState(cloneFormState(INITIAL_GREENFIELD_FORM_STATE));
     setQuestions([]);
     setQuestionAnswers({});
-    setStatusText("已清空当前个人信息输入。");
+    setStatusText("已清空新建简历资料页中的全部内容。");
   }
 
   function handleClearExistingInfo() {
-    setExistingResumeSourceText("");
-    setExistingResumeSourceName("");
-    setExistingJobInfo({
-      target_company: "",
-      target_role: "",
-      job_requirements: "",
-    });
-    setExistingAdditionalAnswers([]);
+    setExistingFormState(createEmptyExistingResumeInput());
     setQuestions([]);
     setQuestionAnswers({});
-    setStatusText("已清空当前岗位优化输入。");
+    setStatusText("已清空现有简历优化资料页中的岗位信息、简历原文和补充回答。");
   }
 
   function handleClearResume() {
-    setResumeTitle("");
-    setResumeText("");
-    setAnalysisNotes([]);
-    setRevisionInstruction("");
+    updateWorkspace(activeBoard, createEmptyResumeWorkspace());
     setQuestions([]);
     setQuestionAnswers({});
     setQuestionsOpen(false);
-    setStatusText("已清空当前简历工作区。");
+    setStatusText(
+      activeBoard === "existing_resume"
+        ? "已清空当前优化结果。"
+        : "已清空当前新建简历结果。",
+    );
   }
 
   function handleRestoreWorkspaceBackup() {
     const savedDraft = memory?.workspace_draft;
     if (!savedDraft?.form_state) {
-      setStatusText("当前还没有可恢复的个人信息备份。");
+      setStatusText("当前还没有可恢复的资料草稿。");
       return;
     }
 
     restoreWorkspaceDraft(savedDraft);
+    const restoredDraftFormState = withAssignedMembershipLevel(savedDraft.form_state);
     lastSavedDraftHashRef.current = JSON.stringify({
-      ...buildWorkspaceDraftPayload({
-        formState: savedDraft.form_state,
-      }),
+      ...buildWorkspaceDraftPayload({ formState: restoredDraftFormState }),
       source: undefined,
     });
     setDraftSaveStatus(
       savedDraft.saved_at
-        ? `已恢复 ${new Date(savedDraft.saved_at).toLocaleString()} 保存的内容`
-        : "已恢复最近一次保存的内容",
+        ? `已恢复 ${new Date(savedDraft.saved_at).toLocaleString()} 保存的资料草稿`
+        : "已恢复最近一次保存的资料草稿",
     );
-    setStatusText("已恢复最近一次保存的个人信息备份。");
+    setStatusText("已恢复最近一次保存的资料草稿。");
   }
 
   async function handleReviseWithAI() {
-    if (!resumeText.trim()) {
-      setStatusText("请先生成简历初稿，再发送给AI。");
+    if (!activeWorkspace.resume_text.trim()) {
+      setStatusText("请先生成一份简历或优化结果，再发给 AI。");
       return;
     }
 
-    const requiredJobInfoError = getRequiredJobInfoError(
-      activeBoard === "existing_resume" ? existingJobInfo : formState.basic_info,
-    );
+    const requiredJobInfoError =
+      activeBoard === "existing_resume"
+        ? getRequiredJobInfoError(existingFormState)
+        : getRequiredJobInfoError(greenfieldFormState.basic_info);
     if (requiredJobInfoError) {
       setStatusText(requiredJobInfoError);
       return;
@@ -900,19 +1002,26 @@ export default function App() {
       const result =
         activeBoard === "existing_resume"
           ? await optimizeExistingResume({
-              resume_text: resumeText,
-              target_company: existingJobInfo.target_company,
-              target_role: existingJobInfo.target_role,
-              job_requirements: existingJobInfo.job_requirements,
-              instruction: revisionInstruction,
-              additional_answers: existingAdditionalAnswers,
+              resume_text: activeWorkspace.resume_text,
+              target_company: existingFormState.target_company,
+              target_role: existingFormState.target_role,
+              job_requirements: existingFormState.job_requirements,
+              instruction: activeWorkspace.revision_instruction,
+              additional_answers: existingFormState.additional_answers,
             })
           : await reviseResume({
-              profile: buildProfilePayload(formState),
-              resume_text: resumeText,
-              instruction: revisionInstruction,
+              profile: buildProfilePayload(greenfieldFormState),
+              resume_text: activeWorkspace.resume_text,
+              instruction: activeWorkspace.revision_instruction,
             });
-      applyResult(result, "简历修订完成，左侧已更新为最新版本。");
+
+      applyResult(
+        activeBoard,
+        result,
+        activeBoard === "existing_resume"
+          ? "优化版简历已更新为最新版本。"
+          : "新建简历已更新为最新版本。",
+      );
       await refreshMemory();
     } catch (error) {
       setStatusText(`修订失败：${error.message}`);
@@ -922,7 +1031,7 @@ export default function App() {
   }
 
   async function handleSaveManualEdit() {
-    if (!resumeText.trim()) {
+    if (!activeWorkspace.resume_text.trim()) {
       setStatusText("当前没有可保存的简历内容。");
       return;
     }
@@ -930,19 +1039,17 @@ export default function App() {
     setLoadingAction("save");
     try {
       const snapshot = await saveResumeSnapshot({
-        target_company:
-          activeBoard === "existing_resume"
-            ? existingJobInfo.target_company
-            : formState.basic_info.target_company,
-        target_role:
-          activeBoard === "existing_resume"
-            ? existingJobInfo.target_role
-            : formState.basic_info.target_role,
-        resume_text: resumeText,
-        generation_mode: generationMode || "manual_preserve",
+        target_company: activeJobInfo.target_company,
+        target_role: activeJobInfo.target_role,
+        resume_text: activeWorkspace.resume_text,
+        generation_mode: activeWorkspace.generation_mode || "manual_preserve",
       });
       const snapshotTime = snapshot.timestamp ? new Date(snapshot.timestamp).toLocaleString() : "刚刚";
-      setStatusText(`已保存当前简历快照：${snapshotTime}`);
+      setStatusText(
+        activeBoard === "existing_resume"
+          ? `已保存当前优化结果快照：${snapshotTime}`
+          : `已保存当前简历快照：${snapshotTime}`,
+      );
       await refreshMemory();
     } catch (error) {
       setStatusText(`保存失败：${error.message}`);
@@ -952,7 +1059,7 @@ export default function App() {
   }
 
   async function handleExport(format) {
-    if (!resumeText.trim()) {
+    if (!activeWorkspace.resume_text.trim()) {
       setStatusText("请先生成或编辑一份简历，再执行导出。");
       return;
     }
@@ -961,17 +1068,27 @@ export default function App() {
     try {
       const fallbackExportTitle =
         activeBoard === "existing_resume"
-          ? buildResumeSnapshotTitle(existingJobInfo.target_company, existingJobInfo.target_role)
-          : buildResumeSnapshotTitle(formState.basic_info.target_company, formState.basic_info.target_role) ||
-            formState.basic_info.name;
-      const fileNameBase = slugifyFileName(resumeTitle || fallbackExportTitle || "resume");
+          ? buildResumeSnapshotTitle(existingFormState.target_company, existingFormState.target_role) ||
+            "优化版简历"
+          : buildResumeSnapshotTitle(
+              greenfieldFormState.basic_info.target_company,
+              greenfieldFormState.basic_info.target_role,
+            ) ||
+            greenfieldFormState.basic_info.name ||
+            "新建简历";
+
+      const fileNameBase = slugifyFileName(activeWorkspace.title || fallbackExportTitle || "resume");
       const { blob, fileName } = await exportResumeFile({
-        resume_text: resumeText,
+        resume_text: activeWorkspace.resume_text,
         file_name: fileNameBase,
         format,
       });
       downloadBlob(blob, fileName);
-      setStatusText(`已导出 ${fileName}。`);
+      setStatusText(
+        activeBoard === "existing_resume"
+          ? `已导出优化版简历：${fileName}`
+          : `已导出简历：${fileName}`,
+      );
       await refreshMemory();
     } catch (error) {
       setStatusText(`导出失败：${error.message}`);
@@ -990,17 +1107,25 @@ export default function App() {
     const company = snapshot?.target_company?.trim();
     const role = snapshot?.target_role?.trim();
     const restoredTitle =
-      [company, role].filter(Boolean).join("｜") || role || company || "已恢复简历快照";
+      [company, role].filter(Boolean).join(" - ") || role || company || "已恢复简历快照";
 
-    setResumeTitle(restoredTitle);
-    setResumeText(restoredText);
-    setGenerationMode(snapshot.generation_mode || "fallback");
-    setStatusText(`已恢复 ${new Date(snapshot.timestamp).toLocaleString()} 保存的简历快照。`);
+    updateWorkspace(activeBoard, (previous) => ({
+      ...previous,
+      title: restoredTitle,
+      resume_text: restoredText,
+      generation_mode: snapshot.generation_mode || "fallback",
+    }));
+
+    setStatusText(
+      activeBoard === "existing_resume"
+        ? `已恢复 ${new Date(snapshot.timestamp).toLocaleString()} 保存的优化结果快照。`
+        : `已恢复 ${new Date(snapshot.timestamp).toLocaleString()} 保存的简历快照。`,
+    );
   }
 
   function handleRedownloadExport(record) {
     if (!record?.resume_text) {
-      setStatusText("这条导出记录来自旧版本，未保存完整正文，暂时无法重新下载。");
+      setStatusText("这条导出记录缺少正文内容，暂时无法重新下载。");
       return;
     }
 
@@ -1058,7 +1183,7 @@ export default function App() {
           content: preview.full_text || preview.extracted_text_preview || "",
           note:
             preview.todo_notice ||
-            (preview.file_type ? `文件类型：${preview.file_type}` : "已从本地上传记录提取预览内容。"),
+            (preview.file_type ? `文件类型：${preview.file_type}` : "已提取本地上传记录内容。"),
           kind: "upload",
           record,
           loading: false,
@@ -1078,7 +1203,7 @@ export default function App() {
         content: record?.resume_text || "",
         note: record?.resume_text
           ? `格式：${record?.format?.toUpperCase?.() || "未知"}`
-          : "这条导出记录来自旧版本，未保存正文内容，暂时无法网页预览。",
+          : "这条导出记录缺少正文内容，暂时无法网页预览。",
         kind: "export",
         record,
         loading: false,
@@ -1150,172 +1275,625 @@ export default function App() {
     }
   }
 
-  const questionCardTitle =
-    questionFlowMode === "existing_resume"
-      ? "为了继续按岗位优化，还需要你补充几项信息"
-      : "生成时发现这些信息还不够具体";
-  const questionCardDescription =
-    questionFlowMode === "existing_resume"
-      ? "回答后，系统会继续围绕目标公司、目标岗位和招聘要求优化这份已有简历。"
-      : "回答后，系统会再次生成简历，并把你的补充信息整合进去。";
-  const questionCardPlaceholder =
-    questionFlowMode === "existing_resume"
-      ? "请输入与你的岗位匹配、项目成果、量化结果或相关经历有关的补充信息..."
-      : "请输入这段经历更具体的职责、动作、结果或数据...";
+  const questionCardCopy = buildQuestionCardCopy(questionFlowMode);
+  const currentModeLabel = BOARD_LABELS[activeBoard] || BOARD_LABELS.greenfield;
+  const currentModelLabel = modelStatus?.model || backendStatus?.model || "未配置";
+  const modelLatencyLabel =
+    typeof modelStatus?.latency_ms === "number" ? `${modelStatus.latency_ms} ms` : "未返回";
+  const modelCheckedLabel = modelStatus?.checked_at
+    ? new Date(modelStatus.checked_at).toLocaleTimeString()
+    : "未检测";
+  const lastStartedLabel = memory?.last_started_at
+    ? new Date(memory.last_started_at).toLocaleString()
+    : "尚未记录";
+  const backendSummaryLabel = backendStatus?.status === "ok" ? "服务在线" : "服务待连接";
+  const aiSummaryLabel = backendStatus?.ai_available ? "AI 服务可用" : "本地生成模式";
+  const modelAvailability = Boolean(modelStatus?.reachable);
+  const modelTestLabel = modelStatusLoading ? "测试中..." : "手动测试";
+  const modelCardMeta = `延迟 ${modelLatencyLabel} · 最近检测 ${modelCheckedLabel}`;
+
+  const hasPendingQuestionsForActiveBoard =
+    questions.length > 0 && questionFlowMode === activeBoard;
+  const greenfieldProfileFieldCount = [
+    greenfieldFormState.basic_info.name,
+    greenfieldFormState.basic_info.email,
+    greenfieldFormState.basic_info.phone,
+    greenfieldFormState.basic_info.city,
+    greenfieldFormState.basic_info.summary,
+    greenfieldFormState.skills_text,
+  ].filter((value) => value.trim()).length;
+  const greenfieldStructuredCount =
+    countFilledItems(greenfieldFormState.education) +
+    countFilledItems(greenfieldFormState.projects) +
+    countFilledItems(greenfieldFormState.experiences);
+  const greenfieldAttachmentCount = [
+    ...greenfieldFormState.projects,
+    ...greenfieldFormState.experiences,
+  ].filter((item) => item.attachment_name).length;
+  const existingResumeReady = Boolean(existingFormState.resume_source_text.trim());
+  const existingAnswerCount = existingFormState.additional_answers.length;
+  const accountMembershipLabel =
+    MEMBERSHIP_LEVEL_LABELS[greenfieldFormState.membership_level] || "高级用户";
+  const accountBalanceLabel = `¥ ${MOCK_ACCOUNT_ENTITLEMENTS.balance.toFixed(2)}`;
+  const accountPointsLabel = MOCK_ACCOUNT_ENTITLEMENTS.points.toLocaleString("zh-CN");
+  const currentBillingModeLabel =
+    BILLING_MODE_LABELS[MOCK_ACCOUNT_ENTITLEMENTS.billing_mode] || "按量付费";
+  const supportedBillingModeLabels = MOCK_ACCOUNT_ENTITLEMENTS.supported_billing_modes.map(
+    (mode) => BILLING_MODE_LABELS[mode] || mode,
+  );
+
+  const workspaceEntryTitle =
+    activeBoard === "existing_resume" ? "优化资料录入" : "新建简历资料录入";
+  const workspaceEntryDescription =
+    activeBoard === "existing_resume"
+      ? "请先进入资料录入页，完善岗位信息并上传现有简历后再执行优化。"
+      : "请先进入资料录入页，完善岗位信息与候选人资料后再生成简历。";
+  const workspaceEntryButtonLabel = "进入资料录入";
+  const greenfieldReadiness = Math.min(
+    100,
+    Math.round(
+      (greenfieldJobInfoReady ? 38 : 0) +
+        (Math.min(greenfieldProfileFieldCount, 6) / 6) * 24 +
+        (Math.min(greenfieldStructuredCount, 3) / 3) * 26 +
+        (Math.min(greenfieldAttachmentCount, 2) / 2) * 12,
+    ),
+  );
+  const existingReadiness = Math.min(
+    100,
+    Math.round(
+      (existingJobInfoReady ? 45 : 0) +
+        (existingResumeReady ? 40 : 0) +
+        (Math.min(existingAnswerCount, 2) / 2) * 15,
+    ),
+  );
+  const activeReadiness =
+    activeBoard === "existing_resume" ? existingReadiness : greenfieldReadiness;
+  const activeReadinessTone =
+    activeReadiness >= 80 ? "可执行" : activeReadiness >= 50 ? "准备中" : "待整理";
+  const activeReadinessDescription =
+    activeBoard === "existing_resume"
+      ? "岗位锚点与原始简历越完整，优化结果越接近目标职位。"
+      : "岗位信息、候选人素材和附件上下文越完整，生成草稿越稳。";
+  const activeFlowSteps =
+    activeBoard === "existing_resume"
+      ? [
+          {
+            index: "01",
+            title: "锁定岗位锚点",
+            detail: "公司、岗位与 JD 会作为整轮优化的判断基准。",
+          },
+          {
+            index: "02",
+            title: "导入现有简历",
+            detail: "支持上传文件或直接粘贴正文，保留原始表达供对照。",
+          },
+          {
+            index: "03",
+            title: "定向优化留档",
+            detail: "生成后继续修订、追问与导出，所有版本都能在历史区回看。",
+          },
+        ]
+      : [
+          {
+            index: "01",
+            title: "定义目标岗位",
+            detail: "目标公司、岗位名称和要求决定生成方向与措辞重点。",
+          },
+          {
+            index: "02",
+            title: "整理候选人素材",
+            detail: "填入经历、项目、技能与附件上下文，给 AI 足够的真实材料。",
+          },
+          {
+            index: "03",
+            title: "生成草稿迭代",
+            detail: "先出第一版，再继续人工修改、AI 修订和版本保存。",
+          },
+        ];
+  const entryCheckpoints =
+    activeBoard === "existing_resume"
+      ? [
+          {
+            label: "岗位锚点",
+            value: existingJobInfoReady ? "已锁定" : "待完善",
+            meta: existingJobInfoReady
+              ? "目标公司、岗位和要求已经具备。"
+              : "先补齐目标公司、岗位名称与 JD。",
+            done: existingJobInfoReady,
+          },
+          {
+            label: "原始简历",
+            value: existingResumeReady ? "已导入" : "待导入",
+            meta: existingResumeReady
+              ? existingFormState.resume_source_name || "正文已录入，可以直接开始优化。"
+              : "上传文件或粘贴正文，作为优化基底。",
+            done: existingResumeReady,
+          },
+          {
+            label: "追问补充",
+            value:
+              existingAnswerCount > 0
+                ? `${existingAnswerCount} 条已补充`
+                : hasPendingQuestionsForActiveBoard
+                  ? "有待处理追问"
+                  : "当前无需补充",
+            meta: hasPendingQuestionsForActiveBoard
+              ? "补完追问后再生成，岗位匹配会更稳。"
+              : "当前没有额外追问阻塞。",
+            done: existingAnswerCount > 0 || !hasPendingQuestionsForActiveBoard,
+          },
+        ]
+      : [
+          {
+            label: "岗位锚点",
+            value: greenfieldJobInfoReady ? "已锁定" : "待完善",
+            meta: greenfieldJobInfoReady
+              ? "当前岗位目标已经明确。"
+              : "先明确目标公司、岗位与 JD。",
+            done: greenfieldJobInfoReady,
+          },
+          {
+            label: "候选人素材",
+            value:
+              greenfieldProfileFieldCount + greenfieldStructuredCount > 0
+                ? `${greenfieldProfileFieldCount + greenfieldStructuredCount} 项已整理`
+                : "待填写",
+            meta:
+              greenfieldProfileFieldCount + greenfieldStructuredCount > 0
+                ? "基础信息、经历与项目已经开始成形。"
+                : "姓名、摘要、技能、经历和项目至少先补一轮。",
+            done: greenfieldProfileFieldCount + greenfieldStructuredCount > 0,
+          },
+          {
+            label: "附件上下文",
+            value: greenfieldAttachmentCount > 0 ? "已增强" : "可选增强项",
+            meta:
+              greenfieldAttachmentCount > 0
+                ? `${greenfieldAttachmentCount} 个附件已关联到项目或经历。`
+                : "附件不是必填，但能帮助 AI 提炼真实细节。",
+            done: greenfieldAttachmentCount > 0,
+          },
+        ];
 
   return (
-    <div className="min-h-screen px-4 py-6 lg:px-8">
-      <div className="mx-auto max-w-[1580px]">
-        <header className="mb-6 paper-panel px-6 py-5">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <p className="text-sm font-semibold tracking-[0.34em] text-[var(--accent)] uppercase">
-                Local AI Resume Generator
-              </p>
-              <h1 className="mt-2 max-w-3xl text-4xl font-semibold leading-tight text-[var(--ink)]">
-                本地 AI 驱动的个性化简历生成系统
-              </h1>
-              <p className="mt-3 max-w-3xl text-base text-[var(--muted)]">
-                点击“AI生成简历”后，系统会先生成草稿，再根据项目经历和实习经历里缺失的具体信息发起追问。
-                目前没有 API Key 也可以完整测试这套交互流程。
-              </p>
+    <div className="app-shell min-h-screen px-4 py-6 lg:px-8">
+      <div className="mx-auto max-w-[1580px] dashboard-grid">
+        <header className="dashboard-hero">
+          <div className="dashboard-hero__intro">
+            <span className="dashboard-badge">Career Atelier</span>
+            <h1 className="dashboard-title">智能简历工作台</h1>
+            <p className="dashboard-description">
+              像整理一份候选人档案一样围绕目标岗位生成或优化简历，在工作台中持续查看正文结果，并进入资料录入与留档。
+            </p>
+
+            <div className="dashboard-ledger" aria-label="当前工作流步骤">
+              {activeFlowSteps.map((step) => (
+                <div key={step.index} className="dashboard-ledger__item">
+                  <span className="dashboard-ledger__index">{step.index}</span>
+                  <div>
+                    <p className="dashboard-ledger__title">{step.title}</p>
+                    <p className="dashboard-ledger__meta">{step.detail}</p>
+                  </div>
+                </div>
+              ))}
             </div>
 
-            <div className="flex flex-wrap gap-2">
-              <span className="chip">阶段：本地测试版</span>
-              <span className="chip">{backendStatus?.ai_available ? "已接入 OpenAI" : "本地兜底模式"}</span>
-              <span className="chip">
-                最近启动：{memory?.last_started_at ? new Date(memory.last_started_at).toLocaleString() : "尚未记录"}
-              </span>
+            <section className="dashboard-readiness" aria-label="资料准备度">
+              <div className="dashboard-readiness__head">
+                <div>
+                  <p className="dashboard-readiness__label">资料准备度</p>
+                  <p className="dashboard-readiness__meta">{activeReadinessDescription}</p>
+                </div>
+                <div className="dashboard-readiness__score">
+                  <strong>{activeReadiness}%</strong>
+                  <span>{activeReadinessTone}</span>
+                </div>
+              </div>
+              <div className="dashboard-readiness__track" aria-hidden="true">
+                <span
+                  className="dashboard-readiness__fill"
+                  style={{ width: `${activeReadiness}%` }}
+                />
+              </div>
+            </section>
+
+            <div className="dashboard-hero__actions">
+              <div className="mt-4 flex flex-wrap gap-2">
+                <span className="chip accent-chip">{backendSummaryLabel}</span>
+                <span className="chip">{aiSummaryLabel}</span>
+                <span className="chip">最近启动：{lastStartedLabel}</span>
+                <span className="chip">
+                  当前追问：{hasPendingQuestionsForActiveBoard ? questions.length : 0}
+                </span>
+              </div>
+
+              <div className="mode-switch">
+                <button
+                  type="button"
+                  onClick={() => handleSwitchBoard("greenfield")}
+                  className={`mode-switch__button ${activeBoard === "greenfield" ? "is-active" : ""}`}
+                >
+                  <span className="mode-switch__title">新建简历</span>
+                  <span className="mode-switch__meta">录入岗位需求与候选人资料，生成初版简历。</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSwitchBoard("existing_resume")}
+                  className={`mode-switch__button ${activeBoard === "existing_resume" ? "is-active" : ""}`}
+                >
+                  <span className="mode-switch__title">现有简历优化</span>
+                  <span className="mode-switch__meta">上传现有简历，围绕目标岗位要求定向优化。</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="dashboard-metrics">
+            <div className="dashboard-stat dashboard-stat--flow">
+              <div>
+                <p className="dashboard-stat__label">当前工作流</p>
+                <p className="dashboard-stat__value">{currentModeLabel}</p>
+              </div>
+              <p className="dashboard-stat__meta">{getBoardIntroStatus(activeBoard)}</p>
+            </div>
+
+            <div className="dashboard-stat dashboard-stat--account">
+              <div>
+                <p className="dashboard-stat__label">账户权益</p>
+                <div className="dashboard-account-grid">
+                  <div>
+                    <p className="dashboard-stat__label">用户名</p>
+                    <p className="dashboard-stat__value dashboard-stat__value--accent">
+                      {sessionUsername}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="dashboard-stat__label">本地记忆</p>
+                    <p className="dashboard-stat__value dashboard-stat__value--accent">
+                      {memory ? "已加载" : "等待加载"}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="dashboard-rights-grid">
+                  <div className="dashboard-rights-tile">
+                    <p className="dashboard-stat__label">余额</p>
+                    <p className="dashboard-rights-tile__value">{accountBalanceLabel}</p>
+                    <p className="dashboard-rights-tile__hint">用于按量付费</p>
+                  </div>
+                  <div className="dashboard-rights-tile">
+                    <p className="dashboard-stat__label">积分</p>
+                    <p className="dashboard-rights-tile__value">{accountPointsLabel}</p>
+                    <p className="dashboard-rights-tile__hint">可抵扣部分生成消耗</p>
+                  </div>
+                  <div className="dashboard-rights-tile">
+                    <p className="dashboard-stat__label">用户等级</p>
+                    <p className="dashboard-rights-tile__value">{accountMembershipLabel}</p>
+                    <p className="dashboard-rights-tile__hint">由系统分配</p>
+                  </div>
+                  <div className="dashboard-rights-tile">
+                    <p className="dashboard-stat__label">当前计费</p>
+                    <p className="dashboard-rights-tile__value">{currentBillingModeLabel}</p>
+                    <p className="dashboard-rights-tile__hint">后续支持买断付费</p>
+                  </div>
+                </div>
+
+                <div className="dashboard-plan-pills">
+                  {supportedBillingModeLabels.map((label) => (
+                    <span
+                      key={label}
+                      className={`chip ${
+                        label === currentBillingModeLabel ? "accent-chip" : ""
+                      }`}
+                    >
+                      {label}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="dashboard-stat dashboard-stat--model">
+              <div>
+                <p className="dashboard-stat__label">模型状态</p>
+                <div className="mt-2 flex flex-wrap items-center gap-3">
+                  <p className="dashboard-stat__value mt-0">{currentModelLabel}</p>
+                  <span
+                    className={`dashboard-status-pill ${
+                      modelAvailability ? "is-available" : "is-unavailable"
+                    }`}
+                  >
+                    <span className="dashboard-status-pill__dot" />
+                    {modelAvailability ? "可用" : "不可用"}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => refreshModelStatus()}
+                    disabled={modelStatusLoading}
+                    className="mini-outline-button"
+                  >
+                    {modelTestLabel}
+                  </button>
+                </div>
+              </div>
+              <p className="dashboard-stat__meta">{modelCardMeta}</p>
             </div>
           </div>
         </header>
 
-        <div className="mb-6 flex flex-wrap gap-3">
-          <button
-            type="button"
-            onClick={() => handleSwitchBoard("greenfield")}
-            className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
-              activeBoard === "greenfield"
-                ? "bg-[var(--accent)] text-white"
-                : "border border-slate-300 bg-white text-[var(--ink)] hover:bg-slate-50"
-            }`}
-          >
-            没有简历，直接开荒
-          </button>
-          <button
-            type="button"
-            onClick={() => handleSwitchBoard("existing_resume")}
-            className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
-              activeBoard === "existing_resume"
-                ? "bg-[var(--accent)] text-white"
-                : "border border-slate-300 bg-white text-[var(--ink)] hover:bg-slate-50"
-            }`}
-          >
-            已有简历，按岗位优化
-          </button>
-        </div>
+        <section className="paper-panel workspace-status-panel px-5 py-4">
+          <div className="workspace-status-panel__head">
+            <div>
+              <p className="text-sm font-semibold tracking-[0.28em] text-[var(--accent)] uppercase">
+                工作状态
+              </p>
+              <h2 className="mt-2 text-2xl font-semibold text-[var(--ink)]">当前工作区</h2>
+              <p
+                aria-live="polite"
+                className="mt-2 max-w-4xl text-sm leading-7 text-[var(--muted)]"
+              >
+                {statusText}
+              </p>
+            </div>
 
-        <ModelMonitorCard
-          backendStatus={backendStatus}
-          monitorStatus={modelStatus}
-          loading={modelStatusLoading}
-          onRefresh={() => refreshModelStatus()}
-        />
-
-        <main className="mt-6 grid min-h-0 items-stretch gap-6 xl:grid-cols-[0.84fr_1.16fr]">
-          <div className="flex min-h-0 flex-col space-y-6">
-            <ResumePreview
-              title={resumeTitle}
-              resumeText={resumeText}
-              onResumeChange={setResumeText}
-              onSaveManualEdit={handleSaveManualEdit}
-              onClearResume={handleClearResume}
-              onExport={handleExport}
-              generationMode={generationMode}
-              analysisNotes={analysisNotes}
-              loading={loading}
-              revisionInstruction={revisionInstruction}
-              onRevisionInstructionChange={setRevisionInstruction}
-              onReviseWithAI={handleReviseWithAI}
-            />
+            <div className="flex flex-wrap gap-2">
+              <span className="chip">{draftSaveStatus || "资料支持自动保存"}</span>
+              <span className="chip">{loading ? "当前有任务执行中" : "当前空闲，可继续操作"}</span>
+            </div>
           </div>
+        </section>
 
-          {activeBoard === "greenfield" ? (
-            <UserFormPanel
-              formState={formState}
-              statusText={statusText}
-              backendStatus={backendStatus}
-              loading={loading}
-              jobInfoReady={greenfieldJobInfoReady}
-              draftSaving={draftSaving}
-              draftSaveStatus={draftSaveStatus}
-              onSaveDraft={handleSaveWorkspace}
-              onClearInfo={handleClearGreenfieldInfo}
-              onRestoreBackup={handleRestoreWorkspaceBackup}
-              hasSavedBackup={Boolean(memory?.workspace_draft?.form_state)}
-              onApplyGenericJobInfo={applyGenericJobInfoToGreenfield}
-              onBasicInfoChange={updateBasicInfo}
-              onMembershipChange={(value) =>
-                setFormState((previous) => ({
-                  ...previous,
-                  membership_level: value,
-                }))
-              }
-              onToggleFullInformation={(checked) =>
-                setFormState((previous) => ({
-                  ...previous,
-                  use_full_information: checked,
-                }))
-              }
-              onSkillsTextChange={(value) =>
-                setFormState((previous) => ({
-                  ...previous,
-                  skills_text: value,
-                }))
-              }
-              onToggleModule={toggleModule}
-              onUploadFiles={handleScopedUpload}
-              onListItemChange={updateListItem}
-              onAddListItem={addListItem}
-              onRemoveListItem={removeListItem}
-              onGenerate={() => generateWithCurrentState(formState, "简历初稿已生成")}
-            />
-          ) : (
-            <ExistingResumePanel
-              statusText={statusText}
-              loading={loading}
-              jobInfoReady={existingJobInfoReady}
-              resumeSourceText={existingResumeSourceText}
-              resumeSourceName={existingResumeSourceName}
-              jobInfo={existingJobInfo}
-              onResumeSourceChange={setExistingResumeSourceText}
-              onJobInfoChange={updateExistingJobInfo}
-              onApplyGenericJobInfo={applyGenericJobInfoToExisting}
-              onUploadResumeFile={handleExistingResumeUpload}
-              onGenerate={() => runExistingResumeOptimize()}
-              onClearInfo={handleClearExistingInfo}
-            />
-          )}
-        </main>
+        {activeInfoPage ? (
+          <section className="subpage-shell">
+            {activeInfoPage === "greenfield" ? (
+              <UserFormPanel
+                jobInfo={greenfieldFormState.basic_info}
+                formState={greenfieldFormState}
+                statusText={statusText}
+                loading={loading}
+                jobInfoReady={greenfieldJobInfoReady}
+                draftSaving={draftSaving}
+                draftSaveStatus={draftSaveStatus}
+                onSaveDraft={handleSaveWorkspace}
+                onClearInfo={handleClearGreenfieldInfo}
+                onRestoreBackup={handleRestoreWorkspaceBackup}
+                hasSavedBackup={Boolean(memory?.workspace_draft?.form_state)}
+                onJobFieldChange={updateGreenfieldBasicInfo}
+                onApplyGenericJobInfo={() => applyGenericJobInfo("greenfield")}
+                onBasicInfoChange={updateGreenfieldBasicInfo}
+                onToggleFullInformation={(checked) =>
+                  setGreenfieldFormState((previous) => ({
+                    ...previous,
+                    use_full_information: checked,
+                  }))
+                }
+                onSkillsTextChange={(value) =>
+                  setGreenfieldFormState((previous) => ({
+                    ...previous,
+                    skills_text: value,
+                  }))
+                }
+                onToggleModule={toggleModule}
+                onUploadFiles={handleScopedUpload}
+                onListItemChange={updateGreenfieldListItem}
+                onAddListItem={addListItem}
+                onRemoveListItem={removeListItem}
+                onGenerate={() => generateWithCurrentState(greenfieldFormState, "简历初稿已生成")}
+                onBack={handleCloseInfoPage}
+                hasPendingQuestions={hasPendingQuestionsForActiveBoard}
+                onOpenQuestions={() => setQuestionsOpen(true)}
+              />
+            ) : (
+              <ExistingResumePanel
+                jobInfo={existingFormState}
+                onJobFieldChange={updateExistingField}
+                onApplyGenericJobInfo={() => applyGenericJobInfo("existing_resume")}
+                statusText={statusText}
+                loading={loading}
+                jobInfoReady={existingJobInfoReady}
+                resumeSourceText={existingFormState.resume_source_text}
+                resumeSourceName={existingFormState.resume_source_name}
+                additionalAnswerCount={existingAnswerCount}
+                onResumeSourceChange={(value) => updateExistingField("resume_source_text", value)}
+                onUploadResumeFile={handleExistingResumeUpload}
+                onGenerate={() => runExistingResumeOptimize()}
+                onClearInfo={handleClearExistingInfo}
+                onBack={handleCloseInfoPage}
+                hasPendingQuestions={hasPendingQuestionsForActiveBoard}
+                onOpenQuestions={() => setQuestionsOpen(true)}
+              />
+            )}
+          </section>
+        ) : (
+          <>
+            <main className="workspace-shell">
+              <div className="min-h-0">
+                {activeBoard === "existing_resume" ? (
+                  <ExistingResumePreview
+                    title={existingResumeWorkspace.title}
+                    resumeText={existingResumeWorkspace.resume_text}
+                    onResumeChange={(value) =>
+                      updateWorkspace("existing_resume", (previous) => ({
+                        ...previous,
+                        resume_text: value,
+                      }))
+                    }
+                    onSaveManualEdit={handleSaveManualEdit}
+                    onClearResume={handleClearResume}
+                    onExport={handleExport}
+                    generationMode={existingResumeWorkspace.generation_mode}
+                    analysisNotes={existingResumeWorkspace.analysis_notes}
+                    loading={loading}
+                    revisionInstruction={existingResumeWorkspace.revision_instruction}
+                    onRevisionInstructionChange={(value) =>
+                      updateWorkspace("existing_resume", (previous) => ({
+                        ...previous,
+                        revision_instruction: value,
+                      }))
+                    }
+                    onReviseWithAI={handleReviseWithAI}
+                  />
+                ) : (
+                  <GreenfieldResumePreview
+                    title={greenfieldWorkspace.title}
+                    resumeText={greenfieldWorkspace.resume_text}
+                    onResumeChange={(value) =>
+                      updateWorkspace("greenfield", (previous) => ({
+                        ...previous,
+                        resume_text: value,
+                      }))
+                    }
+                    onSaveManualEdit={handleSaveManualEdit}
+                    onClearResume={handleClearResume}
+                    onExport={handleExport}
+                    generationMode={greenfieldWorkspace.generation_mode}
+                    analysisNotes={greenfieldWorkspace.analysis_notes}
+                    loading={loading}
+                    revisionInstruction={greenfieldWorkspace.revision_instruction}
+                    onRevisionInstructionChange={(value) =>
+                      updateWorkspace("greenfield", (previous) => ({
+                        ...previous,
+                        revision_instruction: value,
+                      }))
+                    }
+                    onReviseWithAI={handleReviseWithAI}
+                  />
+                )}
+              </div>
 
-        <div className="mt-6">
-          <HistoryCard
-            memory={memory}
-            onRestoreSnapshot={handleRestoreSnapshot}
-            onDeleteSnapshot={handleDeleteSnapshot}
-            onPreviewUpload={handlePreviewUpload}
-            onDeleteUpload={handleDeleteUpload}
-            onPreviewExport={handlePreviewExport}
-            onRedownloadExport={handleRedownloadExport}
-            onDeleteExport={handleDeleteExport}
-          />
-        </div>
+              <aside className="workspace-rail">
+                <section className="paper-panel workspace-entry-card p-6 lg:p-7">
+                  <div className="workspace-entry-card__header">
+                    <div>
+                      <p className="text-sm font-semibold tracking-[0.28em] text-[var(--accent)] uppercase">
+                        资料录入
+                      </p>
+                      <h2 className="mt-2 text-3xl font-semibold text-[var(--ink)]">
+                        {workspaceEntryTitle}
+                      </h2>
+                      <p className="mt-3 text-sm leading-7 text-[var(--muted)]">
+                        {workspaceEntryDescription}
+                      </p>
+                    </div>
+                    <span className="chip accent-chip">{currentModeLabel}</span>
+                  </div>
+
+                  <div className="entry-metric-grid">
+                    {activeBoard === "existing_resume" ? (
+                      <>
+                        <div className="entry-metric">
+                          <span className="entry-metric__label">岗位信息</span>
+                          <strong className="entry-metric__value">
+                            {existingJobInfoReady ? "已完成" : "待填写"}
+                          </strong>
+                        </div>
+                        <div className="entry-metric">
+                          <span className="entry-metric__label">原始简历</span>
+                          <strong className="entry-metric__value">
+                            {existingResumeReady ? "已准备" : "未准备"}
+                          </strong>
+                        </div>
+                        <div className="entry-metric">
+                          <span className="entry-metric__label">补充回答</span>
+                          <strong className="entry-metric__value">{existingAnswerCount}</strong>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="entry-metric">
+                          <span className="entry-metric__label">岗位信息</span>
+                          <strong className="entry-metric__value">
+                            {greenfieldJobInfoReady ? "已完成" : "待填写"}
+                          </strong>
+                        </div>
+                        <div className="entry-metric">
+                          <span className="entry-metric__label">候选人素材</span>
+                          <strong className="entry-metric__value">
+                            {greenfieldProfileFieldCount + greenfieldStructuredCount}
+                          </strong>
+                        </div>
+                        <div className="entry-metric">
+                          <span className="entry-metric__label">关联附件</span>
+                          <strong className="entry-metric__value">{greenfieldAttachmentCount}</strong>
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  <div className="workspace-entry-card__progress">
+                    <div className="workspace-entry-card__progress-head">
+                      <div>
+                        <p className="entry-metric__label">当前准备度</p>
+                        <p className="workspace-entry-card__progress-copy">
+                          {activeReadinessDescription}
+                        </p>
+                      </div>
+                      <strong className="workspace-entry-card__progress-score">
+                        {activeReadiness}% · {activeReadinessTone}
+                      </strong>
+                    </div>
+
+                    <div className="workspace-entry-card__progress-track" aria-hidden="true">
+                      <span
+                        className="workspace-entry-card__progress-fill"
+                        style={{ width: `${activeReadiness}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="entry-checkpoint-grid">
+                    {entryCheckpoints.map((checkpoint) => (
+                      <div
+                        key={checkpoint.label}
+                        className={`entry-checkpoint ${checkpoint.done ? "is-complete" : ""}`}
+                      >
+                        <span className="entry-checkpoint__label">{checkpoint.label}</span>
+                        <strong className="entry-checkpoint__value">{checkpoint.value}</strong>
+                        <p className="entry-checkpoint__meta">{checkpoint.meta}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="mt-6 flex flex-wrap gap-3">
+                    <button
+                      type="button"
+                      onClick={() => handleOpenInfoPage(activeBoard)}
+                      className="pill-button pill-button--primary"
+                    >
+                      {workspaceEntryButtonLabel}
+                    </button>
+                    {hasPendingQuestionsForActiveBoard ? (
+                      <button
+                        type="button"
+                        onClick={() => setQuestionsOpen(true)}
+                        className="pill-button pill-button--ghost"
+                      >
+                        继续回答追问
+                      </button>
+                    ) : null}
+                  </div>
+                </section>
+              </aside>
+            </main>
+
+            <HistoryCard
+              memory={memory}
+              onRestoreSnapshot={handleRestoreSnapshot}
+              onDeleteSnapshot={handleDeleteSnapshot}
+              onPreviewUpload={handlePreviewUpload}
+              onDeleteUpload={handleDeleteUpload}
+              onPreviewExport={handlePreviewExport}
+              onRedownloadExport={handleRedownloadExport}
+              onDeleteExport={handleDeleteExport}
+            />
+          </>
+        )}
       </div>
 
       <ModeSelectionDialog
         open={modeDialogOpen}
         activeBoard={activeBoard}
+        username={sessionUsername}
         onSelect={handleModeSelection}
       />
 
@@ -1333,9 +1911,9 @@ export default function App() {
         onSkip={handleSkipQuestions}
         onClose={() => setQuestionsOpen(false)}
         loading={loading}
-        title={questionCardTitle}
-        description={questionCardDescription}
-        placeholder={questionCardPlaceholder}
+        title={questionCardCopy.title}
+        description={questionCardCopy.description}
+        placeholder={questionCardCopy.placeholder}
       />
 
       <RecordPreviewDialog

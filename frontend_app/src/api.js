@@ -72,6 +72,13 @@ export async function fetchMemory() {
   return parseJsonResponse(response);
 }
 
+export async function resetAiSession() {
+  const response = await fetch(`${API_BASE_URL}/api/session/reset`, {
+    method: "POST",
+  });
+  return parseJsonResponse(response);
+}
+
 export async function saveWorkspaceDraft(payload) {
   const response = await fetch(`${API_BASE_URL}/api/workspace/save`, {
     method: "POST",

@@ -9,14 +9,32 @@ from ai_modules.engine_v2 import ResumeAIEngine
 from app.models import UserProfile
 
 from .memory_service import MemoryService
+from .profile_memory_service import ProfileMemoryService
 
 
 class ResumeService:
     """Orchestrates generation, revision, export, and memory updates."""
 
-    def __init__(self, memory_service: MemoryService, ai_engine: ResumeAIEngine):
+    def __init__(
+        self,
+        memory_service: MemoryService,
+        profile_memory_service: ProfileMemoryService,
+        ai_engine: ResumeAIEngine,
+    ):
         self.memory_service = memory_service
+        self.profile_memory_service = profile_memory_service
         self.ai_engine = ai_engine
+
+    def reset_ai_session_context(self) -> Dict:
+        """Clear transient AI context and reload only the compact persistent user profile."""
+
+        profile_memory = self.profile_memory_service.load()
+        session_context = self.ai_engine.reset_session_context(profile_memory.get("profile") or {})
+        return {
+            "username": profile_memory.get("username") or "ft",
+            "profile_memory": profile_memory,
+            "session_reset_at": session_context.get("session_reset_at"),
+        }
 
     def seed_project_modules(self) -> None:
         """Register the scaffolded modules in memory.json once."""
@@ -77,6 +95,23 @@ class ResumeService:
         """Optimize an uploaded resume for a target job."""
 
         result = self.ai_engine.optimize_existing_resume(payload)
+        profile_memory = self.profile_memory_service.sync_from_profile(
+            {
+                "basic_info": {
+                    "target_company": payload.get("target_company", ""),
+                    "target_role": payload.get("target_role", ""),
+                    "job_requirements": payload.get("job_requirements", ""),
+                    "city": "",
+                },
+                "skills": [],
+                "education": [],
+                "projects": [],
+                "experiences": [],
+                "use_full_information": False,
+            },
+            workflow="existing_resume",
+        )
+        self.ai_engine.update_persistent_profile_memory(profile_memory.get("profile") or {})
         self.memory_service.register_generation(
             {
                 "event": "existing_resume_optimized",
@@ -100,6 +135,11 @@ class ResumeService:
         """Create a resume draft and register each selected module in memory."""
 
         result = self.ai_engine.generate_resume(profile.model_dump())
+        profile_memory = self.profile_memory_service.sync_from_profile(
+            profile.model_dump(),
+            workflow="greenfield",
+        )
+        self.ai_engine.update_persistent_profile_memory(profile_memory.get("profile") or {})
         for module in profile.modules:
             self.memory_service.ensure_generated_module(
                 module_name=f"resume_module::{module}",
@@ -129,6 +169,11 @@ class ResumeService:
             resume_text=resume_text,
             instruction=instruction,
         )
+        profile_memory = self.profile_memory_service.sync_from_profile(
+            profile.model_dump(),
+            workflow="greenfield",
+        )
+        self.ai_engine.update_persistent_profile_memory(profile_memory.get("profile") or {})
         self.memory_service.register_generation(
             {
                 "event": "resume_revised",

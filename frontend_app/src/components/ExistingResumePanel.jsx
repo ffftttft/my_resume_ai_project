@@ -16,98 +16,126 @@ function TextArea({ value, onChange, placeholder, rows = 14 }) {
 }
 
 export default function ExistingResumePanel({
+  jobInfo,
+  onJobFieldChange,
+  onApplyGenericJobInfo,
   statusText,
   loading,
   jobInfoReady,
   resumeSourceText,
   resumeSourceName,
-  jobInfo,
+  additionalAnswerCount,
   onResumeSourceChange,
-  onJobInfoChange,
-  onApplyGenericJobInfo,
   onUploadResumeFile,
   onGenerate,
   onClearInfo,
+  onBack,
+  hasPendingQuestions,
+  onOpenQuestions,
 }) {
   return (
-    <section className="paper-panel flex h-full min-h-0 flex-col overflow-hidden p-6 lg:p-7">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="text-sm font-semibold tracking-[0.28em] text-[var(--accent)] uppercase">
-            Existing Resume
-          </p>
-          <h2 className="mt-2 text-3xl font-semibold text-[var(--ink)]">已有简历按岗位优化</h2>
+    <div className="subpage-flow">
+      <JobTargetSection
+        jobInfo={jobInfo}
+        onFieldChange={onJobFieldChange}
+        title="目标岗位信息 · 现有简历优化"
+        description="用于明确目标岗位、职责要求与优化方向。"
+        actions={
+          <>
+            <button type="button" onClick={onBack} className="mini-outline-button">
+              返回工作台
+            </button>
+            {hasPendingQuestions ? (
+              <button type="button" onClick={onOpenQuestions} className="mini-outline-button">
+                继续补充回答
+              </button>
+            ) : null}
+            <button type="button" onClick={onApplyGenericJobInfo} className="job-target__action">
+              套用通用岗位模板
+            </button>
+          </>
+        }
+      />
+
+      <section className="paper-panel form-section-card p-6">
+        <div className="form-section-card__head">
+          <div>
+            <h3 className="form-section-card__title">执行优化</h3>
+            <p className="form-section-card__subtitle">确认岗位信息与简历原文后生成优化版本。</p>
+          </div>
+
+        <div className="control-deck__actions">
+          <button type="button" onClick={onClearInfo} className="pill-button pill-button--ghost">
+            清空资料
+          </button>
+          <button
+            type="button"
+            onClick={onGenerate}
+            disabled={loading || !resumeSourceText.trim() || !jobInfoReady}
+            className="pill-button pill-button--primary"
+          >
+            {loading ? "优化中..." : "开始优化"}
+          </button>
         </div>
-      </div>
+        </div>
 
-      <div className="mt-4 rounded-[22px] border border-slate-200 bg-[var(--accent-soft)] px-4 py-3 text-sm text-[var(--ink)]">
-        {statusText}
-      </div>
+        <p className="form-section-card__status-note">{statusText}</p>
 
-      <div className="mt-5 min-h-0 flex-1 overflow-hidden rounded-[26px] border border-slate-200 bg-white/62">
-        <div className="panel-scroll-shell h-full min-h-0 space-y-5 overflow-y-scroll p-5 pr-3">
-          <JobTargetSection
-            jobInfo={jobInfo}
-            onFieldChange={onJobInfoChange}
-            onApplyGenericJobInfo={onApplyGenericJobInfo}
-          />
+        <div className="entry-metric-grid">
+          <div className="entry-metric">
+            <span className="entry-metric__label">岗位信息</span>
+            <strong className="entry-metric__value">{jobInfoReady ? "已完成" : "待完善"}</strong>
+          </div>
+          <div className="entry-metric">
+            <span className="entry-metric__label">简历原文</span>
+            <strong className="entry-metric__value">{resumeSourceName || "未上传文件"}</strong>
+          </div>
+          <div className="entry-metric">
+            <span className="entry-metric__label">内容状态</span>
+            <strong className="entry-metric__value">{resumeSourceText.trim() ? "已提取 / 已粘贴" : "待录入"}</strong>
+          </div>
+          <div className="entry-metric">
+            <span className="entry-metric__label">补充回答</span>
+            <strong className="entry-metric__value">{additionalAnswerCount}</strong>
+          </div>
+        </div>
+      </section>
 
-          <section className="rounded-[24px] border border-slate-200 bg-white/78 p-5">
-            <div className="flex flex-wrap gap-3">
-              <button
-                type="button"
-                onClick={onClearInfo}
-                className="rounded-full bg-white px-4 py-2 text-sm font-semibold text-[var(--ink)] transition hover:bg-slate-50"
-              >
-                清空信息
-              </button>
-              <button
-                type="button"
-                onClick={onGenerate}
-                disabled={loading || !resumeSourceText.trim() || !jobInfoReady}
-                className="rounded-full bg-[var(--accent)] px-5 py-2 text-sm font-semibold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {loading ? "处理中..." : "AI 按岗位优化"}
-              </button>
-            </div>
-
-            <p className="mt-3 text-xs text-[var(--muted)]">
-              下方白色区域会直接铺满到底部，岗位信息和上传区都在这里滚动，避免右侧再次被内容撑长。
+      <section className="paper-panel form-section-card p-6">
+        <div className="form-section-card__head">
+          <div>
+            <h3 className="form-section-card__title">简历原文</h3>
+            <p className="form-section-card__subtitle">
+              支持上传 PDF / TXT / MD / DOC / DOCX，也可以直接粘贴正文。
             </p>
-          </section>
-
-          <section className="rounded-[24px] border border-slate-200 bg-white/78 p-5">
-            <div className="mb-4">
-              <h3 className="text-lg font-semibold text-[var(--ink)]">上传原始简历</h3>
-              <p className="mt-1 text-sm text-[var(--muted)]">
-                支持点击上传或直接拖拽。可上传 `PDF / TXT / MD / DOC / DOCX`，上传后会自动提取正文，你也可以继续手动修改。
-              </p>
-            </div>
-
-            <UploadDropZone
-              accept=".pdf,.txt,.md,.doc,.docx"
-              buttonLabel={resumeSourceName ? "重新上传当前简历" : "上传简历"}
-              title={resumeSourceName ? "替换当前简历文件" : "点击选择简历，或直接拖拽到这里"}
-              description="推荐上传 PDF 或 DOCX。上传记录也支持网页预览，不需要每次都先下载。"
-              disabled={loading}
-              onFilesSelected={onUploadResumeFile}
-            />
-
-            {resumeSourceName && (
-              <p className="mt-3 text-xs text-[var(--muted)]">当前文件：{resumeSourceName}</p>
-            )}
-
-            <div className="mt-4">
-              <TextArea
-                value={resumeSourceText}
-                onChange={onResumeSourceChange}
-                rows={14}
-                placeholder="把你现有的简历正文粘贴到这里，或者先上传 PDF / TXT / MD / DOC / DOCX。"
-              />
-            </div>
-          </section>
+          </div>
         </div>
-      </div>
-    </section>
+
+        <UploadDropZone
+          accept=".pdf,.txt,.md,.doc,.docx"
+          buttonLabel={resumeSourceName ? "重新上传当前简历" : "上传简历"}
+          title={resumeSourceName ? "替换当前简历文件" : "点击选择简历，或直接拖拽到这里"}
+          description="推荐上传 PDF 或 DOCX。上传记录仍支持在历史区预览和删除。"
+          disabled={loading}
+          onFilesSelected={onUploadResumeFile}
+        />
+
+        {resumeSourceName ? (
+          <div className="mt-4 flex flex-wrap gap-2">
+            <span className="chip accent-chip">当前文件</span>
+            <span className="chip">{resumeSourceName}</span>
+          </div>
+        ) : null}
+
+        <div className="mt-5">
+          <TextArea
+            value={resumeSourceText}
+            onChange={onResumeSourceChange}
+            rows={16}
+            placeholder="把你现有的简历正文粘贴到这里，或者先上传 PDF / TXT / MD / DOC / DOCX。"
+          />
+        </div>
+      </section>
+    </div>
   );
 }

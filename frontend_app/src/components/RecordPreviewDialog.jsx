@@ -14,58 +14,50 @@ export default function RecordPreviewDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/32 p-4 backdrop-blur-sm">
-      <div className="paper-panel-strong float-card flex max-h-[88vh] w-full max-w-5xl flex-col p-6">
-        <div className="flex items-start justify-between gap-4">
+    <div className="dialog-shell">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="record-preview-title"
+        aria-describedby={note ? "record-preview-note" : undefined}
+        className="paper-panel-strong float-card record-dialog-shell"
+      >
+        <div className="record-dialog-shell__header">
           <div>
-            <p className="text-sm font-semibold tracking-[0.28em] text-[var(--accent)] uppercase">
-              Web Preview
-            </p>
-            <h2 className="mt-2 text-2xl font-semibold text-[var(--ink)]">{title || "预览"}</h2>
+            <p className="record-dialog-shell__eyebrow">Web Preview</p>
+            <h2 id="record-preview-title" className="record-dialog-shell__title">
+              {title || "预览"}
+            </h2>
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-full border border-slate-300 px-3 py-1 text-sm text-slate-600 transition hover:border-slate-500 hover:text-slate-900"
-          >
+          <button type="button" onClick={onClose} className="record-dialog-shell__close">
             关闭
           </button>
         </div>
 
-        <div className="mt-5 min-h-0 flex-1 rounded-[24px] border border-slate-200 bg-white/80 p-4">
+        <div className="record-dialog-shell__frame">
           {loading ? (
-            <div className="flex h-full min-h-[18rem] items-center justify-center text-sm text-[var(--muted)]">
-              正在加载预览内容...
-            </div>
+            <div className="record-dialog-shell__empty">正在加载预览内容...</div>
           ) : content?.trim() ? (
-            <pre className="h-full max-h-[56vh] overflow-auto whitespace-pre-wrap break-words text-sm leading-7 text-[var(--ink)]">
-              {content}
-            </pre>
+            <pre className="record-dialog-shell__content">{content}</pre>
           ) : (
-            <div className="flex h-full min-h-[18rem] items-center justify-center text-sm text-[var(--muted)]">
-              当前没有可预览的正文内容。
-            </div>
+            <div className="record-dialog-shell__empty">当前没有可预览的正文内容。</div>
           )}
         </div>
 
-        {note && <p className="mt-3 text-sm text-[var(--muted)]">{note}</p>}
+        {note ? (
+          <p id="record-preview-note" className="record-dialog-shell__note">
+            {note}
+          </p>
+        ) : null}
 
-        <div className="mt-5 flex flex-wrap justify-end gap-3">
-          {onDownload && (
-            <button
-              type="button"
-              onClick={onDownload}
-              className="rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-500"
-            >
+        <div className="record-dialog-shell__actions">
+          {onDownload ? (
+            <button type="button" onClick={onDownload} className="record-dialog-shell__secondary">
               下载这份记录
             </button>
-          )}
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-full bg-[var(--accent)] px-5 py-2 text-sm font-semibold text-white transition hover:brightness-105"
-          >
+          ) : null}
+          <button type="button" onClick={onClose} className="record-dialog-shell__primary">
             关闭预览
           </button>
         </div>

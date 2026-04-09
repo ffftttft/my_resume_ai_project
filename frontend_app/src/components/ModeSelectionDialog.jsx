@@ -3,48 +3,50 @@ import React from "react";
 const MODE_OPTIONS = [
   {
     value: "greenfield",
-    label: "没有简历，直接生成",
-    description: "从头填写个人信息，系统先出初稿，再只追问一轮最多 3 个关键问题。",
-    tag: "适合首次整理简历",
+    label: "新建简历",
+    description: "录入目标岗位与候选人资料，生成初版简历后再继续补充与优化。",
+    tag: "适合首次整理资料",
+    index: "01",
   },
   {
     value: "existing_resume",
-    label: "已有简历，按岗位优化",
-    description: "上传现有简历后，围绕目标公司、岗位名称和招聘要求定向优化。",
-    tag: "适合已有内容重写",
+    label: "现有简历优化",
+    description: "上传现有简历后，围绕目标岗位要求进行定向优化与重写。",
+    tag: "适合已有内容优化",
+    index: "02",
   },
 ];
 
-export default function ModeSelectionDialog({ open, activeBoard, onSelect }) {
+export default function ModeSelectionDialog({ open, activeBoard, onSelect, username = "ft" }) {
   if (!open) {
     return null;
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(23,49,59,0.42)] p-4 backdrop-blur-sm">
+    <div className="dialog-shell">
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="mode-selection-title"
-        className="paper-panel-strong float-card w-full max-w-3xl p-6 lg:p-7"
+        aria-describedby="mode-selection-description"
+        className="paper-panel-strong float-card mode-dialog-shell"
       >
-        <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="mode-dialog-shell__header">
           <div>
-            <p className="text-sm font-semibold tracking-[0.24em] text-[var(--accent)] uppercase">
-              Choose Mode
-            </p>
-            <h2 id="mode-selection-title" className="mt-2 text-3xl font-semibold text-[var(--ink)]">
-              选择本次使用模式
+            <p className="mode-dialog-shell__eyebrow">工作模式</p>
+            <p className="mode-dialog-shell__user">欢迎回来，{username}</p>
+            <h2 id="mode-selection-title" className="mode-dialog-shell__title">
+              选择工作模式
             </h2>
-            <p className="mt-3 max-w-2xl text-sm text-[var(--muted)]">
-              进入后仍可在页面顶部切换。两种模式都要求填写公司、岗位名称和招聘要求；如果暂时没有明确目标，也可以直接使用通用选项。
+            <p id="mode-selection-description" className="mode-dialog-shell__description">
+              进入后仍可在页面顶部切换模式。
             </p>
           </div>
 
-          <span className="chip accent-chip">首次打开必选</span>
+          <span className="chip accent-chip">首次进入需选择</span>
         </div>
 
-        <div className="mt-6 grid gap-4 md:grid-cols-2">
+        <div className="mode-dialog-shell__grid">
           {MODE_OPTIONS.map((option) => {
             const selected = activeBoard === option.value;
 
@@ -53,20 +55,17 @@ export default function ModeSelectionDialog({ open, activeBoard, onSelect }) {
                 key={option.value}
                 type="button"
                 onClick={() => onSelect(option.value)}
-                className={`rounded-[24px] border px-5 py-5 text-left transition ${
-                  selected
-                    ? "border-[var(--accent)] bg-[var(--accent-soft)]"
-                    : "border-slate-200 bg-white/78 hover:border-[var(--accent)] hover:bg-[var(--accent-soft)]"
-                }`}
+                className={`mode-option ${selected ? "is-selected" : ""}`}
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-lg font-semibold text-[var(--ink)]">{option.label}</p>
-                    <p className="mt-2 text-sm leading-6 text-[var(--muted)]">{option.description}</p>
+                <div className="mode-option__index">{option.index}</div>
+                <div className="mode-option__body">
+                  <div className="mode-option__topline">
+                    <p className="mode-option__label">{option.label}</p>
+                    <span className={`chip ${selected ? "accent-chip" : ""}`}>
+                      {selected ? "当前模式" : option.tag}
+                    </span>
                   </div>
-                  <span className={`chip ${selected ? "accent-chip" : ""}`}>
-                    {selected ? "当前默认模式" : option.tag}
-                  </span>
+                  <p className="mode-option__description">{option.description}</p>
                 </div>
               </button>
             );

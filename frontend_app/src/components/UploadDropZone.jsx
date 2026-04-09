@@ -46,11 +46,7 @@ export default function UploadDropZone({
         setDragging(false);
       }}
       onDrop={handleDrop}
-      className={`rounded-[20px] border border-dashed px-5 py-5 transition ${
-        dragging
-          ? "border-[var(--accent)] bg-[var(--accent-soft)]"
-          : "border-slate-300 bg-slate-50/60"
-      } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
+      className={`upload-dropzone ${dragging ? "is-dragging" : ""} ${disabled ? "is-disabled" : ""}`}
     >
       <input
         id={inputId}
@@ -62,19 +58,22 @@ export default function UploadDropZone({
         className="hidden"
       />
 
-      <div className="text-center">
-        <p className="text-sm font-semibold text-[var(--ink)]">{title}</p>
-        {description && <p className="mt-2 text-sm leading-6 text-[var(--muted)]">{description}</p>}
-        {note && <p className="mt-2 text-xs text-[var(--muted)]">{note}</p>}
+      <div className="upload-dropzone__inner">
+        <div className="upload-dropzone__orb">
+          <span className="upload-dropzone__orb-mark">+</span>
+        </div>
 
-        <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
-          <label
-            htmlFor={inputId}
-            className="cursor-pointer rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-500"
-          >
+        <div className="upload-dropzone__content">
+          <p className="upload-dropzone__title">{title}</p>
+          {description ? <p className="upload-dropzone__description">{description}</p> : null}
+          {note ? <p className="upload-dropzone__note">{note}</p> : null}
+        </div>
+
+        <div className="upload-dropzone__actions">
+          <label htmlFor={inputId} className="upload-dropzone__button">
             {buttonLabel}
           </label>
-          <span className="text-xs text-[var(--muted)]">支持按钮选择，也支持拖拽上传</span>
+          <span className="upload-dropzone__hint">点击选择或直接拖拽上传</span>
         </div>
       </div>
     </div>

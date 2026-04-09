@@ -18,6 +18,8 @@ class Settings(BaseSettings):
 
     project_root: Path = Path(__file__).resolve().parents[2]
     memory_file: Path = project_root / "memory.json"
+    profile_memory_file: Path = project_root / "profile_memory.json"
+    profile_memory_max_bytes: int = 4096
     upload_dir: Path = project_root / "backend" / "uploads"
     backend_host: str = "127.0.0.1"
     backend_port: int = 8000

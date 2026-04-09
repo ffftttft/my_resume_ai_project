@@ -37,6 +37,8 @@ class ResumeAIEngine:
             if self.api_key
             else None
         )
+        self.session_context: Dict[str, object] = {}
+        self.reset_session_context()
 
     @property
     def is_available(self) -> bool:
@@ -63,6 +65,34 @@ class ResumeAIEngine:
         if hostname.endswith("openai.com"):
             return "OpenAI"
         return hostname
+
+    def reset_session_context(self, persistent_profile_memory: Dict | None = None) -> Dict[str, object]:
+        """Clear transient runtime context and reload only the persistent user profile memory."""
+
+        self.session_context = {
+            "session_reset_at": datetime.now(timezone.utc).isoformat(),
+            "persistent_profile_memory": dict(persistent_profile_memory or {}),
+        }
+        return dict(self.session_context)
+
+    def update_persistent_profile_memory(self, persistent_profile_memory: Dict | None = None) -> Dict[str, object]:
+        """Refresh the in-memory persistent profile without carrying over old transient context."""
+
+        if not self.session_context:
+            return self.reset_session_context(persistent_profile_memory)
+
+        self.session_context["persistent_profile_memory"] = dict(persistent_profile_memory or {})
+        return dict(self.session_context)
+
+    def _with_session_context(self, payload: Dict) -> Dict:
+        """Attach the only allowed carry-over memory to one model request."""
+
+        enriched = dict(payload or {})
+        persistent_profile_memory = self.session_context.get("persistent_profile_memory") or {}
+        if persistent_profile_memory:
+            enriched["persistent_profile_memory"] = persistent_profile_memory
+        enriched["session_reset_at"] = self.session_context.get("session_reset_at", "")
+        return enriched
 
     def _stream_text(self, system_prompt: str, payload_text: str) -> str:
         """Collect streamed text from the Responses API."""
@@ -479,7 +509,7 @@ class ResumeAIEngine:
         try:
             result = self._call_openai(
                 QUESTION_SYSTEM_PROMPT,
-                build_questions_input(self._compress_profile(profile_payload)),
+                build_questions_input(self._compress_profile(self._with_session_context(profile_payload))),
             )
             questions = (result.get("questions") or [])[:3]
             return {
@@ -517,7 +547,7 @@ class ResumeAIEngine:
         try:
             result = self._call_openai(
                 RESUME_SYSTEM_PROMPT,
-                build_resume_input(self._compress_profile(profile_payload)),
+                build_resume_input(self._compress_profile(self._with_session_context(profile_payload))),
             )
             questions = (result.get("questions") or [])[:3]
             result["title"] = result.get("title") or fallback_result["title"]
@@ -572,7 +602,11 @@ class ResumeAIEngine:
         try:
             result = self._call_openai(
                 REVISION_SYSTEM_PROMPT,
-                build_revision_input(self._compress_profile(profile_payload), resume_text, instruction),
+                build_revision_input(
+                    self._compress_profile(self._with_session_context(profile_payload)),
+                    resume_text,
+                    instruction,
+                ),
             )
             result["title"] = result.get("title") or title
             result["resume_text"] = result.get("resume_text") or resume_text.strip()
@@ -636,6 +670,7 @@ class ResumeAIEngine:
                     job_requirements=job_requirements,
                     instruction=instruction,
                     additional_answers=payload.get("additional_answers") or [],
+                    persistent_profile_memory=self.session_context.get("persistent_profile_memory") or {},
                 ),
             )
             model_text = self._plain_text(result.get("resume_text") or fallback_text)

@@ -35,10 +35,6 @@ function formatDateTime(value) {
   return parsed.toLocaleString();
 }
 
-function formatLatency(value) {
-  return typeof value === "number" ? `${value} ms` : "未返回";
-}
-
 function getSummaryText(monitorStatus) {
   if (monitorStatus?.error) return monitorStatus.error;
   if (monitorStatus?.reachable) return "当前模型接口可达，可以继续正常生成简历。";
@@ -46,17 +42,9 @@ function getSummaryText(monitorStatus) {
   return "暂时还没有拿到最新探测结果。";
 }
 
-function InfoItem({ label, value }) {
-  return (
-    <div className="rounded-[18px] border border-slate-200 bg-slate-50/80 px-4 py-3">
-      <p className="text-xs font-semibold tracking-[0.2em] text-[var(--muted)] uppercase">{label}</p>
-      <p className="mt-2 break-all text-sm font-semibold text-[var(--ink)]">{value}</p>
-    </div>
-  );
-}
-
 export default function ModelMonitorCard({ backendStatus, monitorStatus, loading, onRefresh }) {
   const statusMeta = STATUS_META[monitorStatus?.status] || STATUS_META.pending;
+  const checkedAt = formatDateTime(monitorStatus?.checked_at);
 
   return (
     <section className="paper-panel p-6">
@@ -65,34 +53,31 @@ export default function ModelMonitorCard({ backendStatus, monitorStatus, loading
           <p className="text-sm font-semibold tracking-[0.28em] text-[var(--accent)] uppercase">
             Model Status
           </p>
-          <h3 className="mt-2 text-2xl font-semibold text-[var(--ink)]">当前模型可用性</h3>
+          <h3 className="mt-2 text-2xl font-semibold text-[var(--ink)]">AI 状态</h3>
           <p className="mt-2 text-sm text-[var(--muted)]">
-            这里展示当前模型是否可用的实时结果，不再显示冗长的探测历史。
+            这里只保留一个结果：现在能不能正常用。
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           <span className={`chip ${statusMeta.chipClass}`}>{statusMeta.label}</span>
+          <span className="chip">{backendStatus?.ai_available ? "可继续生成" : "当前走本地兜底"}</span>
           <button
             type="button"
             onClick={onRefresh}
             disabled={loading}
-            className="rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-500 disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-500 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {loading ? "检查中..." : "刷新状态"}
           </button>
         </div>
       </div>
 
-      <div className={`mt-5 rounded-[24px] px-4 py-4 text-sm ${statusMeta.toneClass}`}>
+      <div className={`mt-5 rounded-[20px] border border-transparent px-4 py-4 text-sm leading-6 ${statusMeta.toneClass}`}>
         {getSummaryText(monitorStatus)}
       </div>
 
-      <div className="mt-5 grid gap-4 md:grid-cols-3">
-        <InfoItem label="模型" value={backendStatus?.model || monitorStatus?.model || "未配置"} />
-        <InfoItem label="最近检查" value={formatDateTime(monitorStatus?.checked_at)} />
-        <InfoItem label="延迟" value={formatLatency(monitorStatus?.latency_ms)} />
-      </div>
+      <p className="mt-4 text-xs text-[var(--muted)]">最近更新：{checkedAt}</p>
     </section>
   );
 }

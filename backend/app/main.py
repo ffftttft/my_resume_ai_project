@@ -8,17 +8,26 @@ from app.config import settings
 from app.routers import resume as resume_router
 from app.services.file_service import FileService
 from app.services.memory_service import MemoryService
+from app.services.profile_memory_service import ProfileMemoryService
 from app.services.resume_service import ResumeService
 
 
 memory_service = MemoryService(settings.memory_file)
+profile_memory_service = ProfileMemoryService(
+    settings.profile_memory_file,
+    max_bytes=settings.profile_memory_max_bytes,
+)
 file_service = FileService(settings.upload_dir)
 ai_engine = ResumeAIEngine(
     api_key=settings.openai_api_key,
     base_url=settings.openai_base_url,
     model_name=settings.openai_model,
 )
-resume_service = ResumeService(memory_service=memory_service, ai_engine=ai_engine)
+resume_service = ResumeService(
+    memory_service=memory_service,
+    profile_memory_service=profile_memory_service,
+    ai_engine=ai_engine,
+)
 
 app = FastAPI(
     title="My Resume AI Project Backend",
@@ -69,4 +78,5 @@ def on_startup() -> None:
     """Read memory.json on startup and make sure scaffold entries exist."""
 
     memory_service.touch_startup()
+    resume_service.reset_ai_session_context()
     resume_service.seed_project_modules()

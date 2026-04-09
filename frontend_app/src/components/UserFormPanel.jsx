@@ -1,4 +1,3 @@
-// Right-side form panel for editing candidate information and triggering resume generation.
 import React from "react";
 
 import JobTargetSection from "./JobTargetSection";
@@ -15,10 +14,10 @@ const MODULE_OPTIONS = [
 
 function Field({ label, children, hint }) {
   return (
-    <label className="block">
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <span className="text-sm font-semibold text-[var(--ink)]">{label}</span>
-        {hint && <span className="text-xs text-[var(--muted)]">{hint}</span>}
+    <label className="form-field">
+      <div className="form-field__head">
+        <span className="form-field__label">{label}</span>
+        {hint ? <span className="form-field__hint">{hint}</span> : null}
       </div>
       {children}
     </label>
@@ -50,11 +49,11 @@ function TextArea({ value, onChange, placeholder, rows = 4 }) {
 
 function SectionCard({ title, subtitle, children, action }) {
   return (
-    <section className="rounded-[24px] border border-slate-200 bg-white/78 p-5">
-      <div className="mb-4 flex items-start justify-between gap-3">
+    <section className="paper-panel form-section-card p-6">
+      <div className="form-section-card__head">
         <div>
-          <h3 className="text-lg font-semibold text-[var(--ink)]">{title}</h3>
-          {subtitle && <p className="mt-1 text-sm text-[var(--muted)]">{subtitle}</p>}
+          <h3 className="form-section-card__title">{title}</h3>
+          {subtitle ? <p className="form-section-card__subtitle">{subtitle}</p> : null}
         </div>
         {action}
       </div>
@@ -65,11 +64,7 @@ function SectionCard({ title, subtitle, children, action }) {
 
 function RemoveButton({ onClick }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="rounded-full border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-500 hover:text-slate-900"
-    >
+    <button type="button" onClick={onClick} className="mini-outline-button">
       删除
     </button>
   );
@@ -79,10 +74,10 @@ function AttachmentField({ item, listKey, index, onUploadFiles, loading }) {
   const itemLabel = listKey === "projects" ? "项目附件" : "经历附件";
 
   return (
-    <div className="rounded-[18px] border border-slate-200 bg-white/76 p-4">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <p className="text-sm font-semibold text-[var(--ink)]">{itemLabel}</p>
-        {item.attachment_name && <span className="chip">{item.attachment_file_type || "已上传"}</span>}
+    <div className="attachment-card">
+      <div className="attachment-card__head">
+        <p className="attachment-card__title">{itemLabel}</p>
+        {item.attachment_name ? <span className="chip">{item.attachment_file_type || "已上传"}</span> : null}
       </div>
 
       <UploadDropZone
@@ -94,27 +89,27 @@ function AttachmentField({ item, listKey, index, onUploadFiles, loading }) {
         onFilesSelected={(files, inputElement) => onUploadFiles(listKey, index, files, inputElement)}
       />
 
-      {item.attachment_name && (
-        <div className="mt-3 rounded-[16px] border border-slate-200 bg-slate-50/80 p-3">
-          <p className="break-all font-semibold text-[var(--ink)]">{item.attachment_name}</p>
-          <p className="mt-2 text-sm text-[var(--muted)]">
-            {item.attachment_preview || "当前附件暂无可提取文本。"}
+      {item.attachment_name ? (
+        <div className="attachment-card__preview">
+          <p className="attachment-card__name">{item.attachment_name}</p>
+          <p className="attachment-card__text">
+            {item.attachment_preview || "当前附件暂时没有可展示的提取文本。"}
           </p>
-          {item.attachment_todo_notice && (
-            <p className="mt-2 text-xs font-semibold text-[var(--accent)]">{item.attachment_todo_notice}</p>
-          )}
+          {item.attachment_todo_notice ? (
+            <p className="attachment-card__note">{item.attachment_todo_notice}</p>
+          ) : null}
         </div>
-      )}
+      ) : null}
 
-      {loading && <p className="mt-2 text-xs text-[var(--muted)]">上传处理中...</p>}
+      {loading ? <p className="attachment-card__loading">上传处理中...</p> : null}
     </div>
   );
 }
 
 export default function UserFormPanel({
+  jobInfo,
   formState,
   statusText,
-  backendStatus,
   loading,
   jobInfoReady,
   draftSaving,
@@ -123,9 +118,9 @@ export default function UserFormPanel({
   onClearInfo,
   onRestoreBackup,
   hasSavedBackup,
+  onJobFieldChange,
   onApplyGenericJobInfo,
   onBasicInfoChange,
-  onMembershipChange,
   onToggleFullInformation,
   onSkillsTextChange,
   onToggleModule,
@@ -134,384 +129,255 @@ export default function UserFormPanel({
   onAddListItem,
   onRemoveListItem,
   onGenerate,
+  onBack,
+  hasPendingQuestions,
+  onOpenQuestions,
 }) {
   return (
-    <section className="paper-panel flex h-full min-h-0 flex-col overflow-hidden p-6 lg:p-7">
-      <div className="flex flex-wrap items-start justify-between gap-4">
+    <div className="subpage-flow">
+      <JobTargetSection
+        jobInfo={jobInfo}
+        onFieldChange={onJobFieldChange}
+        title="目标岗位信息 · 新建简历"
+        description="用于明确目标岗位、职责要求与生成方向。"
+        actions={
+          <>
+            <button type="button" onClick={onBack} className="mini-outline-button">
+              返回工作台
+            </button>
+            {hasPendingQuestions ? (
+              <button type="button" onClick={onOpenQuestions} className="mini-outline-button">
+                继续补充回答
+              </button>
+            ) : null}
+            <button type="button" onClick={onApplyGenericJobInfo} className="job-target__action">
+              套用通用岗位模板
+            </button>
+          </>
+        }
+      />
+
+      <SectionCard title="执行生成" subtitle="保存当前资料并生成初版简历。">
+        <div className="control-deck__actions">
+          <button type="button" onClick={onClearInfo} className="pill-button pill-button--ghost">
+            清空资料
+          </button>
+          <button
+            type="button"
+            onClick={onRestoreBackup}
+            disabled={!hasSavedBackup}
+            className="pill-button pill-button--ghost"
+          >
+            恢复最近保存
+          </button>
+          <button
+            type="button"
+            onClick={onSaveDraft}
+            disabled={draftSaving}
+            className="pill-button pill-button--tint"
+          >
+            {draftSaving ? "保存中..." : "保存资料"}
+          </button>
+          <button
+            type="button"
+            onClick={onGenerate}
+            disabled={loading || !jobInfoReady}
+            className="pill-button pill-button--primary"
+          >
+            {loading ? "生成中..." : "生成简历"}
+          </button>
+        </div>
+
+        <p className="form-section-card__status-note">{statusText}</p>
+
+        <div className="entry-metric-grid">
+          <div className="entry-metric">
+            <span className="entry-metric__label">保存状态</span>
+            <strong className="entry-metric__value">{draftSaveStatus || "等待填写后保存"}</strong>
+          </div>
+          <div className="entry-metric">
+            <span className="entry-metric__label">岗位信息</span>
+            <strong className="entry-metric__value">{jobInfoReady ? "已完成" : "待完善"}</strong>
+          </div>
+          <div className="entry-metric">
+            <span className="entry-metric__label">输出模块</span>
+            <strong className="entry-metric__value">{formState.modules.length}</strong>
+          </div>
+          <div className="entry-metric">
+            <span className="entry-metric__label">补充回答</span>
+            <strong className="entry-metric__value">{formState.additional_answers.length}</strong>
+          </div>
+        </div>
+
         <div>
-          <p className="text-sm font-semibold tracking-[0.28em] text-[var(--accent)] uppercase">
-            Input Studio
-          </p>
-          <h2 className="mt-2 text-3xl font-semibold text-[var(--ink)]">候选人信息面板</h2>
+          <p className="form-subtitle">输出模块</p>
+          <div className="module-option-grid">
+            {MODULE_OPTIONS.map((option) => (
+              <label key={option.value} className="module-option">
+                <input
+                  type="checkbox"
+                  checked={formState.modules.includes(option.value)}
+                  onChange={() => onToggleModule(option.value)}
+                  className="h-4 w-4 rounded accent-[var(--accent)]"
+                />
+                <span>{option.label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      </SectionCard>
+
+      <SectionCard title="个人资料" subtitle="填写基础信息与个人概述。">
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field label="姓名">
+            <TextInput value={formState.basic_info.name} onChange={(value) => onBasicInfoChange("name", value)} placeholder="例如：张三" />
+          </Field>
+          <Field label="邮箱">
+            <TextInput value={formState.basic_info.email} onChange={(value) => onBasicInfoChange("email", value)} placeholder="zhangsan@example.com" />
+          </Field>
+          <Field label="电话">
+            <TextInput value={formState.basic_info.phone} onChange={(value) => onBasicInfoChange("phone", value)} placeholder="13800000000" />
+          </Field>
+          <Field label="城市">
+            <TextInput value={formState.basic_info.city} onChange={(value) => onBasicInfoChange("city", value)} placeholder="上海 / 杭州 / 深圳" />
+          </Field>
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          <span className="chip">{backendStatus?.status === "ok" ? "后端已连接" : "等待后端"}</span>
-          <span className="chip accent-chip">
-            {backendStatus?.ai_available ? `AI: ${backendStatus.model}` : "AI: 本地兜底"}
-          </span>
-        </div>
-      </div>
-
-      <div className="mt-4 rounded-[22px] border border-slate-200 bg-[var(--accent-soft)] px-4 py-3 text-sm text-[var(--ink)]">
-        {statusText}
-      </div>
-
-      <div className="mt-5 min-h-0 flex-1 overflow-hidden rounded-[26px] border border-slate-200 bg-white/62">
-        <div className="panel-scroll-shell h-full min-h-0 space-y-5 overflow-y-scroll p-5 pr-3">
-          <JobTargetSection
-            jobInfo={formState.basic_info}
-            onFieldChange={onBasicInfoChange}
-            onApplyGenericJobInfo={onApplyGenericJobInfo}
+        <Field label="个人摘要" hint="可以留空，交给 AI 首次生成">
+          <TextArea
+            value={formState.basic_info.summary}
+            onChange={(value) => onBasicInfoChange("summary", value)}
+            placeholder="例如：关注后端接口设计、性能优化和工程化交付。"
+            rows={4}
           />
+        </Field>
 
-          <section className="rounded-[24px] border border-slate-200 bg-white/78 p-5">
-            <div className="flex flex-wrap gap-3">
-              <button
-                type="button"
-                onClick={onClearInfo}
-                className="rounded-full bg-white px-4 py-2 text-sm font-semibold text-[var(--ink)] transition hover:bg-slate-50"
-              >
-                清空信息
-              </button>
-              <button
-                type="button"
-                onClick={onSaveDraft}
-                disabled={draftSaving}
-                className="rounded-full bg-[var(--ink)] px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {draftSaving ? "保存中..." : "保存信息"}
-              </button>
-              <button
-                type="button"
-                onClick={onGenerate}
-                disabled={loading || !jobInfoReady}
-                className="rounded-full bg-[var(--accent)] px-5 py-2 text-sm font-semibold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {loading ? "生成中..." : "AI 生成简历"}
-              </button>
+        <label className="toggle-card">
+          <input
+            type="checkbox"
+            checked={formState.use_full_information}
+            onChange={(event) => onToggleFullInformation(event.target.checked)}
+            className="h-4 w-4 rounded accent-[var(--accent)]"
+          />
+          <div>
+            <p className="toggle-card__title">保留完整资料</p>
+            <p className="toggle-card__description">开启后会尽量保留更多背景细节与补充信息。</p>
+          </div>
+        </label>
+      </SectionCard>
+
+      <SectionCard title="技能" subtitle="支持逗号或换行分隔。">
+        <Field label="技能清单">
+          <TextArea value={formState.skills_text} onChange={onSkillsTextChange} placeholder="Python, FastAPI, MySQL, React, Docker" rows={4} />
+        </Field>
+      </SectionCard>
+
+      <SectionCard
+        title="教育经历"
+        subtitle="每条亮点支持逗号或换行分隔，例如 GPA、课程、奖项。"
+        action={
+          <button type="button" onClick={() => onAddListItem("education")} className="mini-outline-button">
+            添加教育
+          </button>
+        }
+      >
+        {formState.education.map((item, index) => (
+          <div key={`education-${index}`} className="form-stack-card">
+            <div className="form-stack-card__head">
+              <p className="form-stack-card__title">教育经历 #{index + 1}</p>
+              {formState.education.length > 1 ? <RemoveButton onClick={() => onRemoveListItem("education", index)} /> : null}
             </div>
-
-            <p className="mt-3 text-xs text-[var(--muted)]">
-              {draftSaveStatus || "个人信息支持手动保存，并会每 30 秒自动保存一次。"}
-            </p>
-
-            <div className="mt-5">
-              <p className="mb-3 text-sm font-semibold text-[var(--ink)]">生成简历模块</p>
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                {MODULE_OPTIONS.map((option) => (
-                  <label
-                    key={option.value}
-                    className="flex items-center gap-3 rounded-[18px] border border-slate-200 bg-slate-50/70 px-4 py-3"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={formState.modules.includes(option.value)}
-                      onChange={() => onToggleModule(option.value)}
-                      className="h-4 w-4 rounded accent-[var(--accent)]"
-                    />
-                    <span className="text-sm font-medium text-[var(--ink)]">{option.label}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          </section>
-
-          <SectionCard
-            title="基本信息"
-            subtitle="这里只保留个人基础资料；岗位信息已经统一放到上方。"
-            action={
-              <button
-                type="button"
-                onClick={onRestoreBackup}
-                disabled={!hasSavedBackup}
-                className="rounded-full border border-slate-300 px-3 py-1 text-sm font-semibold text-slate-700 transition hover:border-slate-500 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                恢复备份
-              </button>
-            }
-          >
             <div className="grid gap-4 md:grid-cols-2">
-              <Field label="姓名">
-                <TextInput
-                  value={formState.basic_info.name}
-                  onChange={(value) => onBasicInfoChange("name", value)}
-                  placeholder="例如：张三"
-                />
+              <Field label="学校">
+                <TextInput value={item.school} onChange={(value) => onListItemChange("education", index, "school", value)} placeholder="XX 大学" />
               </Field>
-              <Field label="邮箱">
-                <TextInput
-                  value={formState.basic_info.email}
-                  onChange={(value) => onBasicInfoChange("email", value)}
-                  placeholder="zhangsan@example.com"
-                />
+              <Field label="学历">
+                <TextInput value={item.degree} onChange={(value) => onListItemChange("education", index, "degree", value)} placeholder="本科 / 硕士" />
               </Field>
-              <Field label="电话">
-                <TextInput
-                  value={formState.basic_info.phone}
-                  onChange={(value) => onBasicInfoChange("phone", value)}
-                  placeholder="13800000000"
-                />
+              <Field label="专业">
+                <TextInput value={item.major} onChange={(value) => onListItemChange("education", index, "major", value)} placeholder="软件工程" />
               </Field>
-              <Field label="城市">
-                <TextInput
-                  value={formState.basic_info.city}
-                  onChange={(value) => onBasicInfoChange("city", value)}
-                  placeholder="上海 / 杭州 / 深圳"
-                />
-              </Field>
-              <Field label="用户等级" hint="高级用户更适合启用更多信息">
-                <select
-                  value={formState.membership_level}
-                  onChange={(event) => onMembershipChange(event.target.value)}
-                  className="field-shell w-full px-4 py-3 outline-none"
-                >
-                  <option value="basic">普通用户</option>
-                  <option value="advanced">高级用户</option>
-                </select>
+              <Field label="起止时间">
+                <TextInput value={item.duration} onChange={(value) => onListItemChange("education", index, "duration", value)} placeholder="2022-09 至 2026-06" />
               </Field>
             </div>
-
-            <Field label="个人摘要" hint="可留空，系统会自动生成">
-              <TextArea
-                value={formState.basic_info.summary}
-                onChange={(value) => onBasicInfoChange("summary", value)}
-                placeholder="例如：关注后端接口设计、性能优化和工程化交付。"
-                rows={4}
-              />
+            <Field label="亮点">
+              <TextArea value={item.highlights_text} onChange={(value) => onListItemChange("education", index, "highlights_text", value)} placeholder={"GPA 3.7/4.0\n主修数据库系统与软件测试"} rows={3} />
             </Field>
+          </div>
+        ))}
+      </SectionCard>
 
-            <label className="flex items-center gap-3 rounded-[18px] border border-slate-200 bg-slate-50/70 px-4 py-3">
-              <input
-                type="checkbox"
-                checked={formState.use_full_information}
-                onChange={(event) => onToggleFullInformation(event.target.checked)}
-                className="h-4 w-4 rounded accent-[var(--accent)]"
-              />
-              <div>
-                <p className="text-sm font-semibold text-[var(--ink)]">启用全量信息</p>
-                <p className="text-xs text-[var(--muted)]">
-                  普通用户默认压缩信息，高级用户建议打开以保留更多细节。
-                </p>
-              </div>
-            </label>
-          </SectionCard>
-
-          <SectionCard title="技能" subtitle="支持逗号或换行分隔。">
-            <Field label="技能清单">
-              <TextArea
-                value={formState.skills_text}
-                onChange={onSkillsTextChange}
-                placeholder="Python, FastAPI, MySQL, React, Docker"
-                rows={4}
-              />
+      <SectionCard
+        title="项目经历"
+        subtitle="每个项目都可以绑定一个附件，AI 会从附件摘要里补足项目细节。"
+        action={
+          <button type="button" onClick={() => onAddListItem("projects")} className="mini-outline-button">
+            添加项目
+          </button>
+        }
+      >
+        {formState.projects.map((item, index) => (
+          <div key={`project-${index}`} className="form-stack-card">
+            <div className="form-stack-card__head">
+              <p className="form-stack-card__title">项目经历 #{index + 1}</p>
+              {formState.projects.length > 1 ? <RemoveButton onClick={() => onRemoveListItem("projects", index)} /> : null}
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field label="项目名称">
+                <TextInput value={item.name} onChange={(value) => onListItemChange("projects", index, "name", value)} placeholder="校园活动管理平台" />
+              </Field>
+              <Field label="你的角色">
+                <TextInput value={item.role} onChange={(value) => onListItemChange("projects", index, "role", value)} placeholder="全栈开发 / 后端负责人" />
+              </Field>
+              <Field label="起止时间">
+                <TextInput value={item.duration} onChange={(value) => onListItemChange("projects", index, "duration", value)} placeholder="2025-02 至 2025-05" />
+              </Field>
+            </div>
+            <Field label="项目描述">
+              <TextArea value={item.description} onChange={(value) => onListItemChange("projects", index, "description", value)} placeholder="简述项目目标、场景和你的核心任务。" rows={3} />
             </Field>
-          </SectionCard>
+            <Field label="项目亮点">
+              <TextArea value={item.highlights_text} onChange={(value) => onListItemChange("projects", index, "highlights_text", value)} placeholder={"使用 FastAPI + React 开发\n接口响应时间降低 30%"} rows={4} />
+            </Field>
+            <AttachmentField item={item} listKey="projects" index={index} onUploadFiles={onUploadFiles} loading={loading} />
+          </div>
+        ))}
+      </SectionCard>
 
-          <SectionCard
-            title="教育经历"
-            subtitle="每条亮点使用逗号或换行分隔，例如 GPA、课程、奖项。"
-            action={
-              <button
-                type="button"
-                onClick={() => onAddListItem("education")}
-                className="rounded-full border border-slate-300 px-3 py-1 text-sm font-semibold text-slate-700 transition hover:border-slate-500"
-              >
-                添加教育
-              </button>
-            }
-          >
-            {formState.education.map((item, index) => (
-              <div
-                key={`education-${index}`}
-                className="rounded-[20px] border border-slate-200 bg-slate-50/75 p-4"
-              >
-                <div className="mb-3 flex items-center justify-between">
-                  <p className="text-sm font-semibold text-[var(--ink)]">教育经历 #{index + 1}</p>
-                  {formState.education.length > 1 && (
-                    <RemoveButton onClick={() => onRemoveListItem("education", index)} />
-                  )}
-                </div>
-                <div className="grid gap-4 md:grid-cols-2">
-                  <Field label="学校">
-                    <TextInput
-                      value={item.school}
-                      onChange={(value) => onListItemChange("education", index, "school", value)}
-                      placeholder="XX大学"
-                    />
-                  </Field>
-                  <Field label="学历">
-                    <TextInput
-                      value={item.degree}
-                      onChange={(value) => onListItemChange("education", index, "degree", value)}
-                      placeholder="本科 / 硕士"
-                    />
-                  </Field>
-                  <Field label="专业">
-                    <TextInput
-                      value={item.major}
-                      onChange={(value) => onListItemChange("education", index, "major", value)}
-                      placeholder="软件工程"
-                    />
-                  </Field>
-                  <Field label="起止时间">
-                    <TextInput
-                      value={item.duration}
-                      onChange={(value) => onListItemChange("education", index, "duration", value)}
-                      placeholder="2022-09 至 2026-06"
-                    />
-                  </Field>
-                </div>
-                <Field label="亮点">
-                  <TextArea
-                    value={item.highlights_text}
-                    onChange={(value) => onListItemChange("education", index, "highlights_text", value)}
-                    placeholder={"GPA 3.7/4.0\n主修数据库系统与软件测试"}
-                    rows={3}
-                  />
-                </Field>
-              </div>
-            ))}
-          </SectionCard>
-
-          <SectionCard
-            title="项目经历"
-            subtitle="每个项目都可以绑定一个附件，AI 会从附件摘要里补充项目细节。"
-            action={
-              <button
-                type="button"
-                onClick={() => onAddListItem("projects")}
-                className="rounded-full border border-slate-300 px-3 py-1 text-sm font-semibold text-slate-700 transition hover:border-slate-500"
-              >
-                添加项目
-              </button>
-            }
-          >
-            {formState.projects.map((item, index) => (
-              <div key={`project-${index}`} className="rounded-[20px] border border-slate-200 bg-slate-50/75 p-4">
-                <div className="mb-3 flex items-center justify-between">
-                  <p className="text-sm font-semibold text-[var(--ink)]">项目经历 #{index + 1}</p>
-                  {formState.projects.length > 1 && (
-                    <RemoveButton onClick={() => onRemoveListItem("projects", index)} />
-                  )}
-                </div>
-                <div className="grid gap-4 md:grid-cols-2">
-                  <Field label="项目名称">
-                    <TextInput
-                      value={item.name}
-                      onChange={(value) => onListItemChange("projects", index, "name", value)}
-                      placeholder="校园活动管理平台"
-                    />
-                  </Field>
-                  <Field label="你的角色">
-                    <TextInput
-                      value={item.role}
-                      onChange={(value) => onListItemChange("projects", index, "role", value)}
-                      placeholder="全栈开发 / 后端负责人"
-                    />
-                  </Field>
-                  <Field label="起止时间">
-                    <TextInput
-                      value={item.duration}
-                      onChange={(value) => onListItemChange("projects", index, "duration", value)}
-                      placeholder="2025-02 至 2025-05"
-                    />
-                  </Field>
-                </div>
-                <Field label="项目描述">
-                  <TextArea
-                    value={item.description}
-                    onChange={(value) => onListItemChange("projects", index, "description", value)}
-                    placeholder="简述项目目标、场景和你的核心任务。"
-                    rows={3}
-                  />
-                </Field>
-                <Field label="项目亮点">
-                  <TextArea
-                    value={item.highlights_text}
-                    onChange={(value) => onListItemChange("projects", index, "highlights_text", value)}
-                    placeholder={"使用 FastAPI + React 开发\n接口响应时间降低 30%"}
-                    rows={4}
-                  />
-                </Field>
-                <AttachmentField
-                  item={item}
-                  listKey="projects"
-                  index={index}
-                  onUploadFiles={onUploadFiles}
-                  loading={loading}
-                />
-              </div>
-            ))}
-          </SectionCard>
-
-          <SectionCard
-            title="实习/工作经历"
-            subtitle="每段经历也支持绑定一个附件，例如周报、总结或汇报材料。"
-            action={
-              <button
-                type="button"
-                onClick={() => onAddListItem("experiences")}
-                className="rounded-full border border-slate-300 px-3 py-1 text-sm font-semibold text-slate-700 transition hover:border-slate-500"
-              >
-                添加经历
-              </button>
-            }
-          >
-            {formState.experiences.map((item, index) => (
-              <div
-                key={`experience-${index}`}
-                className="rounded-[20px] border border-slate-200 bg-slate-50/75 p-4"
-              >
-                <div className="mb-3 flex items-center justify-between">
-                  <p className="text-sm font-semibold text-[var(--ink)]">实习/工作经历 #{index + 1}</p>
-                  {formState.experiences.length > 1 && (
-                    <RemoveButton onClick={() => onRemoveListItem("experiences", index)} />
-                  )}
-                </div>
-                <div className="grid gap-4 md:grid-cols-2">
-                  <Field label="公司">
-                    <TextInput
-                      value={item.company}
-                      onChange={(value) => onListItemChange("experiences", index, "company", value)}
-                      placeholder="示例科技"
-                    />
-                  </Field>
-                  <Field label="岗位">
-                    <TextInput
-                      value={item.role}
-                      onChange={(value) => onListItemChange("experiences", index, "role", value)}
-                      placeholder="后端开发实习生"
-                    />
-                  </Field>
-                  <Field label="起止时间">
-                    <TextInput
-                      value={item.duration}
-                      onChange={(value) => onListItemChange("experiences", index, "duration", value)}
-                      placeholder="2025-07 至 2025-10"
-                    />
-                  </Field>
-                </div>
-                <Field label="经历亮点">
-                  <TextArea
-                    value={item.highlights_text}
-                    onChange={(value) => onListItemChange("experiences", index, "highlights_text", value)}
-                    placeholder={"负责接口开发\n优化 SQL 查询延迟 30%"}
-                    rows={4}
-                  />
-                </Field>
-                <AttachmentField
-                  item={item}
-                  listKey="experiences"
-                  index={index}
-                  onUploadFiles={onUploadFiles}
-                  loading={loading}
-                />
-              </div>
-            ))}
-          </SectionCard>
-        </div>
-      </div>
-    </section>
+      <SectionCard
+        title="实习 / 工作经历"
+        subtitle="每段经历也支持绑定一个附件，例如周报、总结或汇报材料。"
+        action={
+          <button type="button" onClick={() => onAddListItem("experiences")} className="mini-outline-button">
+            添加经历
+          </button>
+        }
+      >
+        {formState.experiences.map((item, index) => (
+          <div key={`experience-${index}`} className="form-stack-card">
+            <div className="form-stack-card__head">
+              <p className="form-stack-card__title">实习 / 工作经历 #{index + 1}</p>
+              {formState.experiences.length > 1 ? <RemoveButton onClick={() => onRemoveListItem("experiences", index)} /> : null}
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field label="公司">
+                <TextInput value={item.company} onChange={(value) => onListItemChange("experiences", index, "company", value)} placeholder="示例科技" />
+              </Field>
+              <Field label="岗位">
+                <TextInput value={item.role} onChange={(value) => onListItemChange("experiences", index, "role", value)} placeholder="后端开发实习生" />
+              </Field>
+              <Field label="起止时间">
+                <TextInput value={item.duration} onChange={(value) => onListItemChange("experiences", index, "duration", value)} placeholder="2025-07 至 2025-10" />
+              </Field>
+            </div>
+            <Field label="经历亮点">
+              <TextArea value={item.highlights_text} onChange={(value) => onListItemChange("experiences", index, "highlights_text", value)} placeholder={"负责接口开发\n优化 SQL 查询延迟 30%"} rows={4} />
+            </Field>
+            <AttachmentField item={item} listKey="experiences" index={index} onUploadFiles={onUploadFiles} loading={loading} />
+          </div>
+        ))}
+      </SectionCard>
+    </div>
   );
 }

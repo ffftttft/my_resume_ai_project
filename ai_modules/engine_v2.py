@@ -308,7 +308,7 @@ class ResumeAIEngine(BaseResumeAIEngine):
         try:
             result = self._call_openai(
                 QUESTION_SYSTEM_PROMPT,
-                build_questions_input(self._compress_profile(profile_payload)),
+                build_questions_input(self._compress_profile(self._with_session_context(profile_payload))),
             )
             questions = self._clean_questions(
                 result.get("questions") or [],
@@ -349,7 +349,7 @@ class ResumeAIEngine(BaseResumeAIEngine):
         try:
             result = self._call_openai(
                 RESUME_SYSTEM_PROMPT,
-                build_resume_input(self._compress_profile(profile_payload)),
+                build_resume_input(self._compress_profile(self._with_session_context(profile_payload))),
             )
             questions = self._clean_questions(
                 result.get("questions") or [],
@@ -419,6 +419,7 @@ class ResumeAIEngine(BaseResumeAIEngine):
                     job_requirements=job_requirements,
                     instruction=instruction,
                     additional_answers=payload.get("additional_answers") or [],
+                    persistent_profile_memory=self.session_context.get("persistent_profile_memory") or {},
                 ),
             )
             model_text = self._plain_text(result.get("resume_text") or fallback_text)

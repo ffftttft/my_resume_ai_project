@@ -8,17 +8,44 @@ function formatDateTime(value) {
   return parsed.toLocaleString();
 }
 
-function ScrollList({ title, subtitle, count, children }) {
+function toTimeValue(value) {
+  if (!value) return 0;
+  const parsed = new Date(value).getTime();
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function pickLatestDistinct(items, getKey) {
+  const indexedItems = (items || []).map((item, index) => ({ item, index }));
+  indexedItems.sort((left, right) => {
+    const timeDiff = toTimeValue(right.item?.timestamp) - toTimeValue(left.item?.timestamp);
+    if (timeDiff !== 0) return timeDiff;
+    return right.index - left.index;
+  });
+
+  const seen = new Set();
+  const distinct = [];
+
+  indexedItems.forEach(({ item }) => {
+    const key = getKey(item);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    distinct.push(item);
+  });
+
+  return distinct;
+}
+
+function SectionBlock({ title, subtitle, count, children }) {
   return (
-    <section className="rounded-[22px] border border-slate-200 bg-white/72 p-4">
-      <div className="flex items-start justify-between gap-3">
+    <section className="history-lane">
+      <div className="history-lane__head">
         <div>
-          <p className="text-sm font-semibold text-[var(--ink)]">{title}</p>
-          {subtitle && <p className="mt-1 text-xs text-[var(--muted)]">{subtitle}</p>}
+          <p className="history-lane__title">{title}</p>
+          {subtitle ? <p className="history-lane__subtitle">{subtitle}</p> : null}
         </div>
         <span className="chip">{count}</span>
       </div>
-      <div className="mt-4 max-h-[24rem] space-y-3 overflow-y-auto pr-2">{children}</div>
+      <div className="history-lane__body">{children}</div>
     </section>
   );
 }
@@ -26,18 +53,13 @@ function ScrollList({ title, subtitle, count, children }) {
 function ActionButton({ label, onClick, tone = "default", disabled = false }) {
   const toneClass =
     tone === "danger"
-      ? "border-orange-200 text-orange-700 hover:border-orange-400"
+      ? "history-action history-action--danger"
       : tone === "accent"
-        ? "border-[var(--accent)] text-[var(--accent)] hover:brightness-105"
-        : "border-slate-300 text-slate-700 hover:border-slate-500";
+        ? "history-action history-action--accent"
+        : "history-action";
 
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className={`rounded-full border px-3 py-1 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${toneClass}`}
-    >
+    <button type="button" onClick={onClick} disabled={disabled} className={toneClass}>
       {label}
     </button>
   );
@@ -48,18 +70,16 @@ function SnapshotItem({ item, onRestoreSnapshot, onDeleteSnapshot }) {
   const targetRole = item.target_role?.trim() || "未填写岗位";
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50/90 p-3">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-xs text-[var(--muted)]">{formatDateTime(item.timestamp)}</p>
-          <p className="mt-2 text-sm font-semibold text-[var(--ink)]">公司：{targetCompany}</p>
-          <p className="mt-1 text-sm font-semibold text-[var(--ink)]">岗位：{targetRole}</p>
-        </div>
+    <div className="history-entry">
+      <div className="history-entry__main">
+        <p className="history-entry__time">{formatDateTime(item.timestamp)}</p>
+        <p className="history-entry__title">{targetCompany}</p>
+        <p className="history-entry__meta">岗位：{targetRole}</p>
+      </div>
 
-        <div className="flex flex-wrap gap-2">
-          <ActionButton label="恢复" onClick={() => onRestoreSnapshot(item)} />
-          <ActionButton label="删除" onClick={() => onDeleteSnapshot(item)} tone="danger" />
-        </div>
+      <div className="history-entry__actions">
+        <ActionButton label="恢复" onClick={() => onRestoreSnapshot(item)} />
+        <ActionButton label="删除" onClick={() => onDeleteSnapshot(item)} tone="danger" />
       </div>
     </div>
   );
@@ -67,27 +87,23 @@ function SnapshotItem({ item, onRestoreSnapshot, onDeleteSnapshot }) {
 
 function UploadItem({ item, onPreviewUpload, onDeleteUpload }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50/90 p-3">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="font-semibold text-[var(--ink)] break-all">{item.original_name || "未命名附件"}</p>
-          <p className="mt-1 text-xs text-[var(--muted)]">
-            {(item.file_type || "未知类型").toUpperCase()} · {formatDateTime(item.timestamp)}
-          </p>
-          {item.todo_notice && (
-            <p className="mt-2 text-xs font-semibold text-[var(--accent)]">{item.todo_notice}</p>
-          )}
-        </div>
+    <div className="history-entry">
+      <div className="history-entry__main">
+        <p className="history-entry__title break-all">{item.original_name || "未命名附件"}</p>
+        <p className="history-entry__meta">
+          {(item.file_type || "未知类型").toUpperCase()} · {formatDateTime(item.timestamp)}
+        </p>
+        {item.todo_notice ? <p className="history-entry__note">{item.todo_notice}</p> : null}
+      </div>
 
-        <div className="flex flex-wrap gap-2">
-          <ActionButton
-            label="预览"
-            onClick={() => onPreviewUpload(item)}
-            tone="accent"
-            disabled={!item.saved_name}
-          />
-          <ActionButton label="删除" onClick={() => onDeleteUpload(item)} tone="danger" />
-        </div>
+      <div className="history-entry__actions">
+        <ActionButton
+          label="预览"
+          onClick={() => onPreviewUpload(item)}
+          tone="accent"
+          disabled={!item.saved_name}
+        />
+        <ActionButton label="删除" onClick={() => onDeleteUpload(item)} tone="danger" />
       </div>
     </div>
   );
@@ -95,32 +111,30 @@ function UploadItem({ item, onPreviewUpload, onDeleteUpload }) {
 
 function ExportItem({ item, onPreviewExport, onRedownloadExport, onDeleteExport }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50/90 p-3">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="font-semibold text-[var(--ink)] break-all">{item.file_name || "未命名导出文件"}</p>
-          <p className="mt-1 text-xs text-[var(--muted)]">
-            {(item.format?.toUpperCase?.() || "未知格式")} · {formatDateTime(item.timestamp)}
-          </p>
-          <p className="mt-2 text-xs text-[var(--muted)]">
-            {typeof item.size_bytes === "number" ? `${item.size_bytes} bytes` : "未记录文件大小"}
-          </p>
-        </div>
+    <div className="history-entry">
+      <div className="history-entry__main">
+        <p className="history-entry__title break-all">{item.file_name || "未命名导出文件"}</p>
+        <p className="history-entry__meta">
+          {(item.format?.toUpperCase?.() || "未知格式")} · {formatDateTime(item.timestamp)}
+        </p>
+        <p className="history-entry__meta">
+          {typeof item.size_bytes === "number" ? `${item.size_bytes} bytes` : "未记录文件大小"}
+        </p>
+      </div>
 
-        <div className="flex flex-wrap gap-2">
-          <ActionButton
-            label="预览"
-            onClick={() => onPreviewExport(item)}
-            tone="accent"
-            disabled={!item.resume_text}
-          />
-          <ActionButton
-            label="下载"
-            onClick={() => onRedownloadExport(item)}
-            disabled={!item.resume_text}
-          />
-          <ActionButton label="删除" onClick={() => onDeleteExport(item)} tone="danger" />
-        </div>
+      <div className="history-entry__actions">
+        <ActionButton
+          label="预览"
+          onClick={() => onPreviewExport(item)}
+          tone="accent"
+          disabled={!item.resume_text}
+        />
+        <ActionButton
+          label="下载"
+          onClick={() => onRedownloadExport(item)}
+          disabled={!item.resume_text}
+        />
+        <ActionButton label="删除" onClick={() => onDeleteExport(item)} tone="danger" />
       </div>
     </div>
   );
@@ -136,18 +150,41 @@ export default function HistoryCard({
   onRedownloadExport,
   onDeleteExport,
 }) {
-  const uploads = [...(memory?.uploaded_files || [])].reverse();
-  const downloads = [...(memory?.downloaded_artifacts || [])].reverse();
-  const snapshots = [...(memory?.resume_snapshots || [])].reverse();
+  const uploads = pickLatestDistinct(memory?.uploaded_files || [], (item) =>
+    [
+      item?.original_name?.trim(),
+      item?.file_type?.trim(),
+      item?.extracted_text_preview?.trim(),
+      item?.todo_notice?.trim(),
+    ]
+      .filter(Boolean)
+      .join("::"),
+  );
+  const downloads = pickLatestDistinct(memory?.downloaded_artifacts || [], (item) =>
+    [item?.file_name?.trim(), item?.format?.trim(), item?.resume_text?.trim()]
+      .filter(Boolean)
+      .join("::"),
+  );
+  const snapshots = pickLatestDistinct(memory?.resume_snapshots || [], (item) =>
+    [
+      item?.target_company?.trim(),
+      item?.target_role?.trim(),
+      item?.generation_mode?.trim(),
+      item?.resume_text?.trim(),
+    ]
+      .filter(Boolean)
+      .join("::"),
+  );
 
   return (
-    <section className="paper-panel p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <section className="paper-panel history-board p-6">
+      <div className="history-board__header">
         <div>
-          <p className="text-sm font-semibold tracking-[0.28em] text-[var(--accent)] uppercase">
-            Persistent Memory
+          <p className="history-board__eyebrow">历史归档</p>
+          <h3 className="history-board__title">本地历史档案</h3>
+          <p className="history-board__description">
+            集中查看快照、上传与导出记录。重复条目会自动合并，仅保留最新记录。
           </p>
-          <h3 className="mt-2 text-2xl font-semibold text-[var(--ink)]">本地持久记录</h3>
         </div>
         <div className="flex flex-wrap gap-2">
           <span className="chip">快照 {snapshots.length}</span>
@@ -156,8 +193,8 @@ export default function HistoryCard({
         </div>
       </div>
 
-      <div className="mt-5 grid gap-4 xl:grid-cols-3">
-        <ScrollList title="简历快照" subtitle="可恢复到编辑区，也可以直接删除。" count={snapshots.length}>
+      <div className="history-board__grid">
+        <SectionBlock title="简历快照" subtitle="可恢复到当前编辑区，也可直接删除。" count={snapshots.length}>
           {snapshots.length > 0 ? (
             snapshots.map((item, index) => (
               <SnapshotItem
@@ -170,11 +207,11 @@ export default function HistoryCard({
           ) : (
             <p className="text-sm text-[var(--muted)]">还没有简历快照。</p>
           )}
-        </ScrollList>
+        </SectionBlock>
 
-        <ScrollList
+        <SectionBlock
           title="上传记录"
-          subtitle="支持网页预览和删除，删除后会同时清理本地保存的上传文件。"
+          subtitle="支持在线预览与删除，删除后会同时清理本地上传文件。"
           count={uploads.length}
         >
           {uploads.length > 0 ? (
@@ -189,11 +226,11 @@ export default function HistoryCard({
           ) : (
             <p className="text-sm text-[var(--muted)]">还没有上传记录。</p>
           )}
-        </ScrollList>
+        </SectionBlock>
 
-        <ScrollList
+        <SectionBlock
           title="导出记录"
-          subtitle="支持网页预览、重新下载和删除，不用每次都先下载再查看。"
+          subtitle="支持在线预览、重新下载与删除。"
           count={downloads.length}
         >
           {downloads.length > 0 ? (
@@ -209,7 +246,7 @@ export default function HistoryCard({
           ) : (
             <p className="text-sm text-[var(--muted)]">还没有导出记录。</p>
           )}
-        </ScrollList>
+        </SectionBlock>
       </div>
     </section>
   );
