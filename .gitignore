@@ -24,5 +24,7 @@ frontend/.env
 frontend_app/.env
 memory.json
 profile_memory.json
+.claude/
+.codex/
 tmp_*.html
 tmp_*.js
