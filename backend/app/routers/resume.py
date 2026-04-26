@@ -20,9 +20,12 @@ from app.models import (
     ExistingResumeOptimizeRequest,
     ExportResumeRequest,
     GenerateResumeRequest,
+    JobContextSearchRequest,
+    RagSearchRequest,
     ReviseResumeRequest,
     SaveResumeSnapshotRequest,
     SaveWorkspaceRequest,
+    SemanticATSScoreRequest,
     UploadedFilePreviewRequest,
 )
 from app.services.file_service import FileService
@@ -49,7 +52,17 @@ def _build_download_filename(file_name: str) -> str:
 def _encode_sse(event: str, payload: dict) -> str:
     """Serialize one server-sent event frame."""
 
-    return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+    try:
+        body = json.dumps(payload, ensure_ascii=False)
+    except TypeError:
+        body = json.dumps(
+            {
+                "message": "Non-serializable payload in SSE stream.",
+                "raw": str(payload),
+            },
+            ensure_ascii=False,
+        )
+    return f"event: {event}\ndata: {body}\n\n"
 
 
 def get_resume_service() -> ResumeService:
@@ -96,6 +109,50 @@ def model_status(service: ResumeService = Depends(get_resume_service)) -> ApiEnv
     """Run a lightweight live probe against the configured model provider."""
 
     return ApiEnvelope(data=service.probe_model_status())
+
+
+@router.post("/ats/semantic-score", response_model=ApiEnvelope)
+def score_semantic_ats(
+    payload: SemanticATSScoreRequest,
+    service: ResumeService = Depends(get_resume_service),
+) -> ApiEnvelope:
+    """Return embedding-based ATS scoring with lexical fallback."""
+
+    result = service.score_semantic_ats(
+        resume_text=payload.resume_text,
+        job_description=payload.job_description,
+    )
+    return ApiEnvelope(data=result)
+
+
+@router.post("/rag/search", response_model=ApiEnvelope)
+def search_rag_references(
+    payload: RagSearchRequest,
+    service: ResumeService = Depends(get_resume_service),
+) -> ApiEnvelope:
+    """Search the local reference-resume corpus for prompt-safe RAG context."""
+
+    result = service.search_rag_references(
+        query=payload.query,
+        top_k=payload.top_k,
+    )
+    return ApiEnvelope(data=result)
+
+
+@router.post("/search/job-context", response_model=ApiEnvelope)
+def search_job_context(
+    payload: JobContextSearchRequest,
+    service: ResumeService = Depends(get_resume_service),
+) -> ApiEnvelope:
+    """Search live job context from the network for the current target role."""
+
+    result = service.search_job_context(
+        target_company=payload.target_company,
+        target_role=payload.target_role,
+        job_requirements=payload.job_requirements,
+        force_refresh=payload.force_refresh,
+    )
+    return ApiEnvelope(data=result)
 
 
 @router.get("/memory", response_model=ApiEnvelope)
@@ -237,8 +294,11 @@ def stream_generate_resume(
     """Stream structured events for new resume generation."""
 
     def event_stream():
-        for event in service.stream_generate_resume(payload.profile):
-            yield _encode_sse(event.get("event", "message"), event.get("data") or {})
+        try:
+            for event in service.stream_generate_resume(payload.profile):
+                yield _encode_sse(event.get("event", "message"), event.get("data") or {})
+        except Exception as exc:
+            yield _encode_sse("error", {"message": f"SSE stream crashed: {exc}"})
 
     response = StreamingResponse(event_stream(), media_type="text/event-stream")
     response.headers["Cache-Control"] = "no-cache"
@@ -280,8 +340,11 @@ def stream_existing_resume(
     """Stream structured optimization events for an uploaded resume."""
 
     def event_stream():
-        for event in service.stream_existing_resume(payload.model_dump()):
-            yield _encode_sse(event.get("event", "message"), event.get("data") or {})
+        try:
+            for event in service.stream_existing_resume(payload.model_dump()):
+                yield _encode_sse(event.get("event", "message"), event.get("data") or {})
+        except Exception as exc:
+            yield _encode_sse("error", {"message": f"SSE stream crashed: {exc}"})
 
     response = StreamingResponse(event_stream(), media_type="text/event-stream")
     response.headers["Cache-Control"] = "no-cache"

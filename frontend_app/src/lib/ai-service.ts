@@ -1,35 +1,23 @@
 import partialParseModule from "partial-json-parser";
-import { z } from "zod";
-import { zodToJsonSchema } from "zod-to-json-schema";
 
-import { structuredResumeSchema, workspaceResultSchema } from "../schemas/resume";
+import {
+  parseExistingResumeOptimizeRequest,
+  parseGenerateResumeRequest,
+  parsePartialWorkspaceResult,
+  parseWorkspaceResult,
+} from "../schemas/resume";
 
 const partialParse = partialParseModule.default ?? partialParseModule;
 
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") || "http://127.0.0.1:8000";
 
-function buildSchemaSnapshot() {
-  const candidate = zodToJsonSchema(structuredResumeSchema, "StructuredResume");
-  if (candidate?.definitions?.StructuredResume && Object.keys(candidate.definitions.StructuredResume).length > 0) {
-    return candidate;
+function validateStreamPayload(path, payload) {
+  if (path === "/api/resume/existing/stream") {
+    return parseExistingResumeOptimizeRequest(payload);
   }
 
-  return z.toJSONSchema(structuredResumeSchema, {
-    reused: "ref",
-  });
-}
-
-function normalizePartialResult(partial) {
-  return {
-    title: typeof partial?.title === "string" ? partial.title : "",
-    analysis_notes: Array.isArray(partial?.analysis_notes) ? partial.analysis_notes : [],
-    questions: Array.isArray(partial?.questions) ? partial.questions : [],
-    structured_resume:
-      partial?.structured_resume && typeof partial.structured_resume === "object"
-        ? partial.structured_resume
-        : null,
-  };
+  return parseGenerateResumeRequest(payload);
 }
 
 function parseSseChunk(chunk) {
@@ -65,28 +53,27 @@ async function streamWorkspaceResult(
   payload,
   { onStatus, onPartial, onFinal, onError, signal } = {},
 ) {
+  const validatedPayload = validateStreamPayload(path, payload);
+
   const response = await fetch(`${API_BASE_URL}${path}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      ...payload,
-      schema_snapshot: buildSchemaSnapshot(),
-    }),
+    body: JSON.stringify(validatedPayload),
     signal,
   });
 
   if (!response.ok || !response.body) {
     const message = await response.text().catch(() => "");
-    throw new Error(message || "无法启动简历流式生成。");
+    throw new Error(message || "Unable to start structured resume streaming.");
   }
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
   let rawJson = "";
-  let deferredError: Error | null = null;
+  let deferredError = null;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -107,24 +94,34 @@ async function streamWorkspaceResult(
       if (event === "partial") {
         rawJson += eventPayload.delta || "";
         try {
-          const partial = normalizePartialResult(partialParse(rawJson));
+          const partial = parsePartialWorkspaceResult(partialParse(rawJson));
           onPartial?.(partial, rawJson);
         } catch {
-          onPartial?.(normalizePartialResult({}), rawJson);
+          onPartial?.(parsePartialWorkspaceResult({}), rawJson);
         }
         continue;
       }
 
       if (event === "error") {
-        const error = new Error(eventPayload?.message || "流式生成失败。");
+        const error = new Error(eventPayload?.message || "Structured stream generation failed.");
         deferredError = error;
         continue;
       }
 
       if (event === "final") {
-        const finalResult = workspaceResultSchema.parse(eventPayload);
-        onFinal?.(finalResult);
-        return finalResult;
+        try {
+          const finalResult = parseWorkspaceResult(eventPayload);
+          onFinal?.(finalResult);
+          return finalResult;
+        } catch (error) {
+          const validationError = new Error(
+            error instanceof Error
+              ? `Final workspace result failed contract validation: ${error.message}`
+              : "Final workspace result failed contract validation.",
+          );
+          onError?.(validationError);
+          throw validationError;
+        }
       }
     }
 
@@ -138,7 +135,7 @@ async function streamWorkspaceResult(
     throw deferredError;
   }
 
-  throw new Error("流式连接已结束，但未收到最终结果。");
+  throw new Error("The stream ended before a final structured result arrived.");
 }
 
 export async function generateResumeStream(

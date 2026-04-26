@@ -1,4 +1,4 @@
-"""Persistent memory service that reads and updates the root memory.json file."""
+"""Compact persistent memory service for the root memory.json file."""
 
 from __future__ import annotations
 
@@ -10,7 +10,11 @@ from typing import Any, Dict
 
 
 class MemoryService:
-    """Read/write helper around memory.json with simple thread-safe updates."""
+    """Keep memory.json small, readable, and stable across sessions."""
+
+    upload_history_limit = 8
+    download_history_limit = 8
+    snapshot_history_limit = 8
 
     def __init__(self, memory_file: Path):
         self.memory_file = memory_file
@@ -20,25 +24,29 @@ class MemoryService:
 
     @staticmethod
     def _now() -> str:
-        """Return an ISO timestamp for audit records."""
+        """Return an ISO timestamp."""
 
         return datetime.now().astimezone().isoformat()
+
+    @staticmethod
+    def _compact_text(value: Any, limit: int) -> str:
+        """Normalize text values stored in memory.json."""
+
+        text = str(value or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+        return text[:limit]
 
     def _default_payload(self) -> Dict[str, Any]:
         """Default structure created when memory.json does not exist yet."""
 
         return {
-            "note": "Local persistent memory for my_resume_ai_project.",
+            "note": "Compact local memory for my_resume_ai_project.",
             "project_name": "my_resume_ai_project",
             "created_at": self._now(),
             "last_started_at": None,
             "workspace_draft": None,
-            "generated_modules": [],
             "uploaded_files": [],
             "downloaded_artifacts": [],
-            "generation_history": [],
             "resume_snapshots": [],
-            "sessions": [],
         }
 
     def _ensure_file(self) -> None:
@@ -50,29 +58,175 @@ class MemoryService:
                 encoding="utf-8",
             )
 
+    def _normalize_workspace_draft(self, draft: Any) -> Dict[str, Any] | None:
+        """Keep only the latest recoverable workspace draft."""
+
+        if not isinstance(draft, dict):
+            return None
+
+        form_state = draft.get("form_state")
+        if not isinstance(form_state, dict):
+            return None
+
+        return {
+            "form_state": form_state,
+            "source": self._compact_text(draft.get("source") or "manual", 24) or "manual",
+            "saved_at": self._compact_text(draft.get("saved_at"), 64) or self._now(),
+        }
+
+    def _normalize_upload_record(self, record: Any) -> Dict[str, Any] | None:
+        """Keep only fields the frontend uses for uploaded-file history."""
+
+        if not isinstance(record, dict):
+            return None
+
+        saved_name = self._compact_text(record.get("saved_name"), 128)
+        original_name = self._compact_text(record.get("original_name"), 256)
+        file_type = self._compact_text(record.get("file_type"), 16)
+        timestamp = self._compact_text(record.get("timestamp"), 64)
+
+        if not (saved_name or original_name or timestamp):
+            return None
+
+        return {
+            "original_name": original_name,
+            "saved_name": saved_name,
+            "file_type": file_type,
+            "todo_notice": self._compact_text(record.get("todo_notice"), 240) or None,
+            "timestamp": timestamp or self._now(),
+        }
+
+    def _normalize_download_record(self, record: Any) -> Dict[str, Any] | None:
+        """Keep only fields the frontend uses for export history."""
+
+        if not isinstance(record, dict):
+            return None
+
+        file_name = self._compact_text(record.get("file_name"), 256)
+        timestamp = self._compact_text(record.get("timestamp"), 64)
+        if not (file_name or timestamp):
+            return None
+
+        size_bytes = record.get("size_bytes")
+        if not isinstance(size_bytes, int):
+            size_bytes = None
+
+        return {
+            "file_name": file_name,
+            "format": self._compact_text(record.get("format"), 16),
+            "size_bytes": size_bytes,
+            "resume_text": self._compact_text(record.get("resume_text"), 20000),
+            "timestamp": timestamp or self._now(),
+        }
+
+    def _normalize_analysis_notes(self, value: Any) -> list[str]:
+        """Keep only compact generation notes used in the history drawer."""
+
+        if not isinstance(value, list):
+            return []
+
+        normalized: list[str] = []
+        for item in value:
+            note = self._compact_text(item, 320)
+            if note and note not in normalized:
+                normalized.append(note)
+        return normalized[:8]
+
+    def _normalize_snapshot_record(self, record: Any) -> Dict[str, Any] | None:
+        """Keep only fields needed to restore or review a saved resume snapshot."""
+
+        if not isinstance(record, dict):
+            return None
+
+        timestamp = self._compact_text(record.get("timestamp"), 64)
+        resume_text = self._compact_text(record.get("resume_text"), 20000)
+        if not (timestamp or resume_text):
+            return None
+
+        return {
+            "timestamp": timestamp or self._now(),
+            "title": self._compact_text(record.get("title"), 180),
+            "target_company": self._compact_text(record.get("target_company"), 120),
+            "target_role": self._compact_text(record.get("target_role"), 120),
+            "resume_text": resume_text,
+            "generation_mode": self._compact_text(record.get("generation_mode"), 48) or "fallback",
+            "analysis_notes": self._normalize_analysis_notes(record.get("analysis_notes")),
+        }
+
+    def _normalize_recent_records(
+        self,
+        items: Any,
+        normalizer,
+        limit: int,
+    ) -> list[Dict[str, Any]]:
+        """Normalize a record list and keep only the latest entries."""
+
+        normalized: list[Dict[str, Any]] = []
+        for item in items or []:
+            record = normalizer(item)
+            if record:
+                normalized.append(record)
+        return normalized[-limit:]
+
+    def _normalize_payload(self, payload: Dict[str, Any] | None) -> Dict[str, Any]:
+        """Drop legacy keys and rebuild the compact memory shape."""
+
+        source = payload if isinstance(payload, dict) else {}
+        base = self._default_payload()
+        return {
+            "note": self._compact_text(source.get("note") or base["note"], 240) or base["note"],
+            "project_name": self._compact_text(source.get("project_name") or base["project_name"], 80)
+            or base["project_name"],
+            "created_at": self._compact_text(source.get("created_at"), 64) or base["created_at"],
+            "last_started_at": self._compact_text(source.get("last_started_at"), 64) or None,
+            "workspace_draft": self._normalize_workspace_draft(source.get("workspace_draft")),
+            "uploaded_files": self._normalize_recent_records(
+                source.get("uploaded_files"),
+                self._normalize_upload_record,
+                self.upload_history_limit,
+            ),
+            "downloaded_artifacts": self._normalize_recent_records(
+                source.get("downloaded_artifacts"),
+                self._normalize_download_record,
+                self.download_history_limit,
+            ),
+            "resume_snapshots": self._normalize_recent_records(
+                source.get("resume_snapshots"),
+                self._normalize_snapshot_record,
+                self.snapshot_history_limit,
+            ),
+        }
+
     def load(self) -> Dict[str, Any]:
-        """Load the current memory payload from disk."""
+        """Load the current normalized memory payload from disk."""
 
         with self._lock:
-            return json.loads(self.memory_file.read_text(encoding="utf-8"))
+            try:
+                raw_payload = json.loads(self.memory_file.read_text(encoding="utf-8"))
+            except Exception:
+                raw_payload = self._default_payload()
+                self.memory_file.write_text(
+                    json.dumps(raw_payload, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+            return self._normalize_payload(raw_payload)
 
     def save(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Persist a full memory payload back to disk."""
+        """Persist a normalized memory payload back to disk."""
 
+        normalized = self._normalize_payload(payload)
         with self._lock:
             self.memory_file.write_text(
-                json.dumps(payload, ensure_ascii=False, indent=2),
+                json.dumps(normalized, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
-        return payload
+        return normalized
 
     def touch_startup(self) -> Dict[str, Any]:
-        """Record backend startup time so the next launch knows the service history."""
+        """Update the last backend startup time."""
 
         payload = self.load()
-        timestamp = self._now()
-        payload["last_started_at"] = timestamp
-        payload["sessions"].append({"event": "backend_startup", "timestamp": timestamp})
+        payload["last_started_at"] = self._now()
         return self.save(payload)
 
     def ensure_generated_module(
@@ -82,61 +236,63 @@ class MemoryService:
         path: str,
         details: str,
     ) -> Dict[str, Any]:
-        """Register a generated module once and avoid duplicates by module name + path."""
+        """Compatibility no-op for legacy module-registration calls."""
 
-        payload = self.load()
-        exists = any(
-            item["module_name"] == module_name and item["path"] == path
-            for item in payload["generated_modules"]
-        )
-        if not exists:
-            payload["generated_modules"].append(
-                {
-                    "module_name": module_name,
-                    "category": category,
-                    "path": path,
-                    "generated_at": self._now(),
-                    "details": details,
-                }
-            )
-        return self.save(payload)
+        _ = (module_name, category, path, details)
+        return self.load()
 
     def register_upload(self, upload_record: Dict[str, Any]) -> Dict[str, Any]:
-        """Append an uploaded file record."""
+        """Append a compact uploaded-file record."""
 
         payload = self.load()
-        upload_record["timestamp"] = self._now()
-        payload["uploaded_files"].append(upload_record)
+        payload["uploaded_files"].append(
+            {
+                "original_name": upload_record.get("original_name", ""),
+                "saved_name": upload_record.get("saved_name", ""),
+                "file_type": upload_record.get("file_type", ""),
+                "todo_notice": upload_record.get("todo_notice"),
+                "timestamp": self._now(),
+            }
+        )
         return self.save(payload)
 
     def register_generation(self, generation_record: Dict[str, Any]) -> Dict[str, Any]:
-        """Append a resume generation event and keep a latest snapshot."""
+        """Store only user-visible resume snapshots from generation events."""
 
         payload = self.load()
-        generation_record["timestamp"] = self._now()
-        payload["generation_history"].append(generation_record)
         if generation_record.get("event") in {
             "resume_generated",
             "resume_revised",
             "existing_resume_optimized",
+            "resume_streamed",
+            "existing_resume_streamed",
         }:
             payload["resume_snapshots"].append(
                 {
-                    "timestamp": generation_record["timestamp"],
+                    "timestamp": self._now(),
+                    "title": generation_record.get("title", ""),
                     "target_company": generation_record.get("target_company", ""),
                     "target_role": generation_record.get("target_role", ""),
                     "resume_text": generation_record.get("resume_text", ""),
                     "generation_mode": generation_record.get("generation_mode", "fallback"),
+                    "analysis_notes": generation_record.get("analysis_notes") or [],
                 }
             )
         return self.save(payload)
 
     def register_download(self, download_record: Dict[str, Any]) -> Dict[str, Any]:
-        """Append a download/export event."""
+        """Append a compact download/export record."""
 
         payload = self.load()
-        download_record["timestamp"] = self._now()
-        payload["downloaded_artifacts"].append(download_record)
+        payload["downloaded_artifacts"].append(
+            {
+                "file_name": download_record.get("file_name", ""),
+                "format": download_record.get("format", ""),
+                "size_bytes": download_record.get("size_bytes"),
+                "resume_text": download_record.get("resume_text", ""),
+                "timestamp": self._now(),
+            }
+        )
         return self.save(payload)
 
     def save_workspace_draft(self, draft_record: Dict[str, Any]) -> Dict[str, Any]:
@@ -144,26 +300,30 @@ class MemoryService:
 
         payload = self.load()
         payload["workspace_draft"] = {
-            **draft_record,
+            "form_state": draft_record.get("form_state") or {},
+            "source": draft_record.get("source") or "manual",
             "saved_at": self._now(),
         }
-        self.save(payload)
+        payload = self.save(payload)
         return payload["workspace_draft"]
 
     def save_resume_snapshot(self, snapshot_record: Dict[str, Any]) -> Dict[str, Any]:
-        """Persist one resume snapshot created from the left editor."""
+        """Persist one manual resume snapshot."""
 
         payload = self.load()
-        snapshot = {
-            "timestamp": self._now(),
-            "target_company": snapshot_record.get("target_company", ""),
-            "target_role": snapshot_record.get("target_role", ""),
-            "resume_text": snapshot_record.get("resume_text", ""),
-            "generation_mode": snapshot_record.get("generation_mode", "manual_preserve"),
-        }
-        payload["resume_snapshots"].append(snapshot)
-        self.save(payload)
-        return snapshot
+        payload["resume_snapshots"].append(
+            {
+                "timestamp": self._now(),
+                "title": snapshot_record.get("title", ""),
+                "target_company": snapshot_record.get("target_company", ""),
+                "target_role": snapshot_record.get("target_role", ""),
+                "resume_text": snapshot_record.get("resume_text", ""),
+                "generation_mode": snapshot_record.get("generation_mode", "manual_preserve"),
+                "analysis_notes": snapshot_record.get("analysis_notes") or [],
+            }
+        )
+        payload = self.save(payload)
+        return payload["resume_snapshots"][-1]
 
     def delete_resume_snapshot(self, timestamp: str) -> bool:
         """Delete one saved resume snapshot by timestamp."""

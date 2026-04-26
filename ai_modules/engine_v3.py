@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Dict, List
 
 from ai_modules.engine_v2 import ResumeAIEngine as TightResumeAIEngine
@@ -69,11 +68,26 @@ class ResumeAIEngine(TightResumeAIEngine):
             projects=generated.projects or fallback.projects,
         )
 
+    def _revision_fallback_resume(self, profile_payload: Dict, resume_text: str) -> StructuredResume:
+        """Build a deterministic fallback contract for manual edits or failed revisions."""
+
+        profile_resume = self._structured_from_profile(profile_payload)
+        basic_info = profile_payload.get("basic_info", {})
+        text_resume = self._structured_from_existing_payload(
+            {
+                "resume_text": resume_text,
+                "target_company": basic_info.get("target_company", ""),
+                "target_role": basic_info.get("target_role", ""),
+            }
+        )
+        return self._merge_structured_resume(text_resume, profile_resume)
+
     def _fallback_resume_result(
         self,
         profile_payload: Dict,
         fallback_questions: List[str],
         analysis_notes: List[str],
+        warning: str = "",
     ) -> Dict:
         """Build a consistent fallback response from structured local data."""
 
@@ -84,22 +98,32 @@ class ResumeAIEngine(TightResumeAIEngine):
             questions=fallback_questions,
             mode="fallback",
             used_ai=False,
+            contract_source="fallback",
+            llm_contract_ok=False,
+            warning=warning or (analysis_notes[0] if analysis_notes else ""),
         )
 
-    def _fallback_existing_resume_result(self, payload: Dict, fallback_questions: List[str], note: str) -> Dict:
+    def _fallback_existing_resume_result(
+        self,
+        payload: Dict,
+        fallback_questions: List[str],
+        note: str,
+        warning: str = "",
+    ) -> Dict:
         """Build a fallback result for uploaded-resume optimization."""
 
         structured_resume = self._structured_from_existing_payload(payload)
-        result = self._result_from_structured_resume(
+        return self._result_from_structured_resume(
             structured_resume,
             analysis_notes=[note],
             questions=fallback_questions,
             mode="fallback",
             used_ai=False,
             title=((payload.get("target_company") or "").strip() + " " + (payload.get("target_role") or "").strip()).strip(),
+            contract_source="fallback",
+            llm_contract_ok=False,
+            warning=warning or note,
         )
-        result["resume_text"] = self._plain_text((payload.get("resume_text") or "").strip())
-        return result
 
     def generate_questions(self, profile_payload: Dict) -> Dict:
         """Generate compressed follow-up questions with a strict response schema."""
@@ -134,7 +158,7 @@ class ResumeAIEngine(TightResumeAIEngine):
                 "detected_gaps": ["openai_error"],
                 "ready_for_generation": len(fallback_questions) == 0,
                 "used_ai": False,
-                "warning": f"结构化追问生成失败：{exc}",
+                "warning": f"Structured question generation failed: {exc}",
             }
 
     def generate_resume(self, profile_payload: Dict) -> Dict:
@@ -147,7 +171,8 @@ class ResumeAIEngine(TightResumeAIEngine):
             return self._fallback_resume_result(
                 profile_payload,
                 fallback_questions,
-                ["当前启用本地兜底渲染，结构化契约已在本地生成。"],
+                ["OpenAI is unavailable, so the workspace rendered a local structured fallback."],
+                warning="Structured model output unavailable. Local contract fallback used.",
             )
 
         try:
@@ -160,9 +185,7 @@ class ResumeAIEngine(TightResumeAIEngine):
                 already_answered=self._has_answered_follow_up(profile_payload),
             )
             structured_resume = self._merge_structured_resume(result.structured_resume, fallback_resume)
-            analysis_notes = result.analysis_notes or []
-            if not analysis_notes:
-                analysis_notes = ["结构化输出已通过简历数据契约校验。"]
+            analysis_notes = result.analysis_notes or ["Structured resume output passed contract validation."]
             return self._result_from_structured_resume(
                 structured_resume,
                 analysis_notes=analysis_notes,
@@ -170,14 +193,17 @@ class ResumeAIEngine(TightResumeAIEngine):
                 mode="openai",
                 used_ai=True,
                 title=result.title,
+                contract_source="model",
+                llm_contract_ok=True,
+                warning="",
             )
         except Exception as exc:
-            fallback = self._fallback_resume_result(
+            return self._fallback_resume_result(
                 profile_payload,
                 fallback_questions,
-                [f"结构化生成失败，系统已切换为本地兜底：{exc}"],
+                [f"Structured resume generation failed, so the system fell back to a local contract: {exc}"],
+                warning=f"Structured response validation failed: {exc}",
             )
-            return fallback
 
     def stream_generate_resume(self, profile_payload: Dict):
         """Stream JSON deltas for greenfield resume generation and finish with a validated result."""
@@ -190,8 +216,11 @@ class ResumeAIEngine(TightResumeAIEngine):
         yield {
             "event": "status",
             "data": {
-                "phase": "schema",
-                "message": "正在锁定简历数据契约，并准备流式生成提示词。",
+                "phase": "draft",
+                "message": "正在生成结构化简历草稿...",
+                "step": 3,
+                "total_steps": 6,
+                "meta": {},
             },
         }
 
@@ -200,7 +229,7 @@ class ResumeAIEngine(TightResumeAIEngine):
                 title=fallback_title,
                 structured_resume=fallback_resume,
                 questions=fallback_questions,
-                analysis_notes=["OpenAI 当前不可用，系统已切换为本地结构化兜底流式输出。"],
+                analysis_notes=["OpenAI is unavailable, so a local structured fallback was streamed instead."],
             )
             raw_json = ""
             for chunk in self._chunk_text(fallback_generation.model_dump_json(), chunk_size=120):
@@ -208,11 +237,22 @@ class ResumeAIEngine(TightResumeAIEngine):
                 yield {"event": "partial", "data": {"delta": chunk, "raw_json": raw_json}}
 
             yield {
+                "event": "status",
+                "data": {
+                    "phase": "validate",
+                    "message": "正在校验结构化结果...",
+                    "step": 4,
+                    "total_steps": 6,
+                    "meta": {},
+                },
+            }
+            yield {
                 "event": "final",
                 "data": self._fallback_resume_result(
                     profile_payload,
                     fallback_questions,
-                    ["当前启用本地兜底渲染，结构化契约已在本地生成。"],
+                    ["OpenAI is unavailable, so the workspace rendered a local structured fallback."],
+                    warning="Structured model output unavailable. Local contract fallback used.",
                 ),
             }
             return
@@ -220,13 +260,6 @@ class ResumeAIEngine(TightResumeAIEngine):
         raw_json = ""
 
         try:
-            yield {
-                "event": "status",
-                "data": {
-                    "phase": "streaming",
-                    "message": "模型正在流式返回结构化 JSON。",
-                },
-            }
             with self.client.responses.stream(
                 model=self.model_name,
                 input=build_resume_messages(session_profile),
@@ -248,14 +281,24 @@ class ResumeAIEngine(TightResumeAIEngine):
                 raw_json or getattr(parsed_response, "output_text", "") or "",
             )
             if not parsed:
-                raise ValueError("模型流式输出结束，但没有得到可解析的结构化结果。")
+                raise ValueError("The model stream finished without a valid structured result.")
 
+            yield {
+                "event": "status",
+                "data": {
+                    "phase": "validate",
+                    "message": "正在校验结构化结果...",
+                    "step": 4,
+                    "total_steps": 6,
+                    "meta": {},
+                },
+            }
             questions = self._clean_questions(
                 parsed.questions,
                 already_answered=self._has_answered_follow_up(profile_payload),
             )
             structured_resume = self._merge_structured_resume(parsed.structured_resume, fallback_resume)
-            analysis_notes = parsed.analysis_notes or ["结构化输出已通过简历数据契约校验。"]
+            analysis_notes = parsed.analysis_notes or ["Structured stream output passed contract validation."]
 
             yield {
                 "event": "final",
@@ -266,6 +309,9 @@ class ResumeAIEngine(TightResumeAIEngine):
                     mode="openai",
                     used_ai=True,
                     title=parsed.title or fallback_title,
+                    contract_source="model",
+                    llm_contract_ok=True,
+                    warning="",
                 ),
             }
         except Exception as exc:
@@ -273,7 +319,7 @@ class ResumeAIEngine(TightResumeAIEngine):
                 title=fallback_title,
                 structured_resume=fallback_resume,
                 questions=fallback_questions,
-                analysis_notes=[f"流式生成失败，已切换为本地结构化兜底：{exc}"],
+                analysis_notes=[f"Structured stream generation failed, so the system fell back locally: {exc}"],
             )
             if not raw_json:
                 for chunk in self._chunk_text(fallback_generation.model_dump_json(), chunk_size=120):
@@ -282,7 +328,7 @@ class ResumeAIEngine(TightResumeAIEngine):
             yield {
                 "event": "error",
                 "data": {
-                    "message": f"结构化流式生成失败，已启用本地兜底：{exc}",
+                    "message": f"Structured stream generation failed, local fallback enabled: {exc}",
                 },
             }
             yield {
@@ -290,39 +336,42 @@ class ResumeAIEngine(TightResumeAIEngine):
                 "data": self._fallback_resume_result(
                     profile_payload,
                     fallback_questions,
-                    [f"结构化生成失败，系统已切换为本地兜底：{exc}"],
+                    [f"Structured resume generation failed, so the system fell back to a local contract: {exc}"],
+                    warning=f"Structured response validation failed: {exc}",
                 ),
             }
 
     def revise_resume(self, profile_payload: Dict, resume_text: str, instruction: str) -> Dict:
         """Revise a draft while preserving a validated resume contract."""
 
-        fallback_resume = self._structured_from_profile(profile_payload)
+        fallback_resume = self._revision_fallback_resume(profile_payload, resume_text)
         fallback_title = self._title_from_structured_resume(fallback_resume)
 
         if not instruction.strip():
-            result = self._result_from_structured_resume(
+            return self._result_from_structured_resume(
                 fallback_resume,
-                analysis_notes=["未提供 AI 修订指令，系统已保留当前手动草稿。"],
+                analysis_notes=["No AI revision instruction was provided, so the current draft was preserved through the local contract renderer."],
                 questions=[],
                 mode="manual_preserve",
                 used_ai=False,
                 title=fallback_title,
+                contract_source="fallback",
+                llm_contract_ok=False,
+                warning="Revision skipped because no AI instruction was provided.",
             )
-            result["resume_text"] = resume_text.strip()
-            return result
 
         if not self.structured_client:
-            result = self._result_from_structured_resume(
+            return self._result_from_structured_resume(
                 fallback_resume,
-                analysis_notes=["AI 当前不可用，已保留现有草稿，修订指令未执行。"],
+                analysis_notes=["OpenAI is unavailable, so the current draft was preserved through the local contract renderer."],
                 questions=[],
                 mode="fallback",
                 used_ai=False,
                 title=fallback_title,
+                contract_source="fallback",
+                llm_contract_ok=False,
+                warning="Structured revision unavailable. Local contract fallback used.",
             )
-            result["resume_text"] = resume_text.strip()
-            return result
 
         try:
             result = self._call_structured(
@@ -334,7 +383,7 @@ class ResumeAIEngine(TightResumeAIEngine):
                 ),
             )
             structured_resume = self._merge_structured_resume(result.structured_resume, fallback_resume)
-            analysis_notes = result.analysis_notes or ["结构化修订结果已通过简历数据契约校验。"]
+            analysis_notes = result.analysis_notes or ["Structured revision output passed contract validation."]
             return self._result_from_structured_resume(
                 structured_resume,
                 analysis_notes=analysis_notes,
@@ -342,18 +391,22 @@ class ResumeAIEngine(TightResumeAIEngine):
                 mode="openai",
                 used_ai=True,
                 title=result.title or fallback_title,
+                contract_source="model",
+                llm_contract_ok=True,
+                warning="",
             )
         except Exception as exc:
-            result = self._result_from_structured_resume(
+            return self._result_from_structured_resume(
                 fallback_resume,
-                analysis_notes=[f"结构化修订失败，已保留当前草稿：{exc}"],
+                analysis_notes=[f"Structured revision failed, so the workspace kept a local contract version of the draft: {exc}"],
                 questions=[],
                 mode="fallback",
                 used_ai=False,
                 title=fallback_title,
+                contract_source="fallback",
+                llm_contract_ok=False,
+                warning=f"Structured revision validation failed: {exc}",
             )
-            result["resume_text"] = resume_text.strip()
-            return result
 
     def optimize_existing_resume(self, payload: Dict) -> Dict:
         """Optimize an uploaded resume and return a validated contract."""
@@ -366,7 +419,8 @@ class ResumeAIEngine(TightResumeAIEngine):
             return self._fallback_existing_resume_result(
                 payload,
                 fallback_questions,
-                "当前启用本地兜底优化，结构化契约已根据上传文本生成。",
+                "OpenAI is unavailable, so the uploaded resume was normalized through the local contract renderer.",
+                warning="Structured model output unavailable. Local contract fallback used.",
             )
 
         try:
@@ -380,6 +434,7 @@ class ResumeAIEngine(TightResumeAIEngine):
                     instruction=(payload.get("instruction") or "").strip(),
                     additional_answers=payload.get("additional_answers") or [],
                     persistent_profile_memory=self.session_context.get("persistent_profile_memory") or {},
+                    web_context=payload.get("web_context") or [],
                 ),
             )
             questions = self._clean_questions(
@@ -387,7 +442,7 @@ class ResumeAIEngine(TightResumeAIEngine):
                 already_answered=self._has_answered_follow_up(payload),
             )
             structured_resume = self._merge_structured_resume(result.structured_resume, fallback_resume)
-            analysis_notes = result.analysis_notes or ["Uploaded resume was normalized into the strict resume contract."]
+            analysis_notes = result.analysis_notes or ["Uploaded resume output passed strict contract validation."]
             return self._result_from_structured_resume(
                 structured_resume,
                 analysis_notes=analysis_notes,
@@ -395,12 +450,16 @@ class ResumeAIEngine(TightResumeAIEngine):
                 mode="openai",
                 used_ai=True,
                 title=result.title or fallback_title,
+                contract_source="model",
+                llm_contract_ok=True,
+                warning="",
             )
         except Exception as exc:
             return self._fallback_existing_resume_result(
                 payload,
                 fallback_questions,
-                f"结构化优化失败，系统已切换为本地兜底：{exc}",
+                f"Structured optimization failed, so the uploaded resume was normalized locally: {exc}",
+                warning=f"Structured response validation failed: {exc}",
             )
 
     def stream_existing_resume(self, payload: Dict):
@@ -413,8 +472,11 @@ class ResumeAIEngine(TightResumeAIEngine):
         yield {
             "event": "status",
             "data": {
-                "phase": "schema",
-                "message": "正在锁定简历数据契约，并准备流式生成提示词。",
+                "phase": "draft",
+                "message": "正在重写并优化结构化简历...",
+                "step": 3,
+                "total_steps": 6,
+                "meta": {},
             },
         }
 
@@ -423,7 +485,7 @@ class ResumeAIEngine(TightResumeAIEngine):
                 title=fallback_title,
                 structured_resume=fallback_resume,
                 questions=fallback_questions,
-                analysis_notes=["OpenAI 当前不可用，系统已切换为本地结构化兜底流式输出。"],
+                analysis_notes=["OpenAI is unavailable, so a local structured fallback was streamed instead."],
             )
             raw_json = ""
             for chunk in self._chunk_text(fallback_generation.model_dump_json(), chunk_size=120):
@@ -431,11 +493,22 @@ class ResumeAIEngine(TightResumeAIEngine):
                 yield {"event": "partial", "data": {"delta": chunk, "raw_json": raw_json}}
 
             yield {
+                "event": "status",
+                "data": {
+                    "phase": "validate",
+                    "message": "正在校验结构化结果...",
+                    "step": 4,
+                    "total_steps": 6,
+                    "meta": {},
+                },
+            }
+            yield {
                 "event": "final",
                 "data": self._fallback_existing_resume_result(
                     payload,
                     fallback_questions,
-                    "当前使用本地兜底优化，结构化契约已根据上传简历内容生成。",
+                    "OpenAI is unavailable, so the uploaded resume was normalized through the local contract renderer.",
+                    warning="Structured model output unavailable. Local contract fallback used.",
                 ),
             }
             return
@@ -443,13 +516,6 @@ class ResumeAIEngine(TightResumeAIEngine):
         raw_json = ""
 
         try:
-            yield {
-                "event": "status",
-                "data": {
-                    "phase": "streaming",
-                    "message": "模型正在流式返回结构化 JSON。",
-                },
-            }
             with self.client.responses.stream(
                 model=self.model_name,
                 input=build_existing_resume_messages(
@@ -460,6 +526,7 @@ class ResumeAIEngine(TightResumeAIEngine):
                     instruction=(payload.get("instruction") or "").strip(),
                     additional_answers=payload.get("additional_answers") or [],
                     persistent_profile_memory=self.session_context.get("persistent_profile_memory") or {},
+                    web_context=payload.get("web_context") or [],
                 ),
                 text_format=ResumeGenerationResult,
                 temperature=0.2,
@@ -479,14 +546,24 @@ class ResumeAIEngine(TightResumeAIEngine):
                 raw_json or getattr(parsed_response, "output_text", "") or "",
             )
             if not parsed:
-                raise ValueError("模型流式输出结束，但没有得到可解析的结构化结果。")
+                raise ValueError("The model stream finished without a valid structured result.")
 
+            yield {
+                "event": "status",
+                "data": {
+                    "phase": "validate",
+                    "message": "正在校验结构化结果...",
+                    "step": 4,
+                    "total_steps": 6,
+                    "meta": {},
+                },
+            }
             questions = self._clean_questions(
                 parsed.questions,
                 already_answered=self._has_answered_follow_up(payload),
             )
             structured_resume = self._merge_structured_resume(parsed.structured_resume, fallback_resume)
-            analysis_notes = parsed.analysis_notes or ["上传简历已被规范化为严格的结构化简历契约。"]
+            analysis_notes = parsed.analysis_notes or ["Uploaded resume stream output passed strict contract validation."]
 
             yield {
                 "event": "final",
@@ -497,6 +574,9 @@ class ResumeAIEngine(TightResumeAIEngine):
                     mode="openai",
                     used_ai=True,
                     title=parsed.title or fallback_title,
+                    contract_source="model",
+                    llm_contract_ok=True,
+                    warning="",
                 ),
             }
         except Exception as exc:
@@ -504,7 +584,7 @@ class ResumeAIEngine(TightResumeAIEngine):
                 title=fallback_title,
                 structured_resume=fallback_resume,
                 questions=fallback_questions,
-                analysis_notes=[f"流式生成失败，已切换为本地结构化兜底：{exc}"],
+                analysis_notes=[f"Structured optimization stream failed, so the system fell back locally: {exc}"],
             )
             if not raw_json:
                 for chunk in self._chunk_text(fallback_generation.model_dump_json(), chunk_size=120):
@@ -513,7 +593,7 @@ class ResumeAIEngine(TightResumeAIEngine):
             yield {
                 "event": "error",
                 "data": {
-                    "message": f"结构化流式生成失败，已启用本地兜底：{exc}",
+                    "message": f"Structured optimization stream failed, local fallback enabled: {exc}",
                 },
             }
             yield {
@@ -521,6 +601,7 @@ class ResumeAIEngine(TightResumeAIEngine):
                 "data": self._fallback_existing_resume_result(
                     payload,
                     fallback_questions,
-                    f"结构化流式生成失败，系统已切换为本地兜底：{exc}",
+                    f"Structured optimization failed, so the uploaded resume was normalized locally: {exc}",
+                    warning=f"Structured response validation failed: {exc}",
                 ),
             }

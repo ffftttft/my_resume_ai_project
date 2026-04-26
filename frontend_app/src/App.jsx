@@ -13,6 +13,9 @@ import {
   reviseResume,
   resetAiSession,
   saveResumeSnapshot,
+  searchJobContext,
+  searchRagReferences,
+  scoreSemanticAts,
   saveWorkspaceDraft,
   uploadFiles,
 } from "./api";
@@ -20,15 +23,24 @@ import {
   generateGreenfieldResumeStream,
   generateResumeStream,
 } from "./lib/ai-service";
+import AtsDashboard from "./components/AtsDashboard";
+import AiProgressTimeline from "./components/AiProgressTimeline";
+import DraftLabPanel from "./components/DraftLabPanel";
+import EditAnchorNav from "./components/EditAnchorNav";
 import ExistingResumePanel from "./components/ExistingResumePanel";
-import ExistingResumePreview from "./components/ExistingResumePreview";
-import GreenfieldResumePreview from "./components/GreenfieldResumePreview";
-import HistoryCard from "./components/HistoryCard";
+import JobInsightDrawer from "./components/JobInsightDrawer";
+import LiveJsonModal from "./components/LiveJsonModal";
 import ModeSelectionDialog from "./components/ModeSelectionDialog";
 import QuestionCard from "./components/QuestionCard";
 import RecordPreviewDialog from "./components/RecordPreviewDialog";
+import ResumeWorkbenchPreview from "./components/ResumeWorkbenchPreview";
 import UserFormPanel from "./components/UserFormPanel";
+import WorkspaceHistoryDrawer from "./components/WorkspaceHistoryDrawer";
+import WorkspaceSidebar from "./components/WorkspaceSidebar";
+import { calculateATSScore } from "./lib/ats-scorer";
+import { normalizeMonthInput } from "./lib/date-utils";
 import { renderStructuredResumeMarkdown } from "./lib/resume-renderer";
+import { normalizeResumeText } from "./lib/resume-text";
 
 function createEmptyEducation() {
   return {
@@ -101,10 +113,81 @@ function createEmptyLiveStreamState() {
     board: "",
     active: false,
     status: "",
+    phase: "",
+    step: 0,
+    totalSteps: 0,
+    meta: null,
     partial_result: null,
     raw_json: "",
     error: "",
   };
+}
+
+function getPhaseLabel(phase) {
+  const phaseMap = {
+    search: "正在联网搜索岗位信息",
+    synthesize: "正在提炼岗位关键词",
+    draft: "正在生成简历内容",
+    validate: "正在校验结构化结果",
+    score: "正在计算匹配度与完成度",
+    complete: "正在整理最终结果",
+  };
+
+  return phaseMap[phase] || "正在处理中";
+}
+
+function buildStreamActivityItems(liveStreamState, activeBoard) {
+  if (liveStreamState.board !== activeBoard || !liveStreamState.active) {
+    return [];
+  }
+
+  const items = [
+    {
+      key: "phase",
+      label: getPhaseLabel(liveStreamState.phase),
+      detail: liveStreamState.status || "模型正在处理当前任务。",
+    },
+  ];
+
+  if (liveStreamState.phase === "search") {
+    items.push({
+      key: "search-tip",
+      label: "正在查看岗位来源与要求",
+      detail: "会优先结合联网岗位情报和你填写的 JD。",
+    });
+  }
+
+  if (liveStreamState.phase === "draft" || liveStreamState.phase === "validate") {
+    items.push({
+      key: "draft-tip",
+      label: "正在逐步写入与修正文稿",
+      detail: "右侧简历草稿会随着结构化结果持续刷新。",
+    });
+  }
+
+  if (liveStreamState.meta?.warning) {
+    items.push({
+      key: "warning",
+      label: "已触发回退或告警处理",
+      detail: liveStreamState.meta.warning,
+    });
+  }
+
+  return items.slice(0, 3);
+}
+
+function getStreamStepText(liveStreamState, activeBoard) {
+  if (liveStreamState.board !== activeBoard || !liveStreamState.active) {
+    return "";
+  }
+
+  const step = Number(liveStreamState.step) || 0;
+  const totalSteps = Number(liveStreamState.totalSteps) || 0;
+  if (!step || !totalSteps) {
+    return "";
+  }
+
+  return `第 ${Math.min(step, totalSteps)} / ${totalSteps} 步`;
 }
 
 const MEMBERSHIP_LEVEL_LABELS = Object.freeze({
@@ -140,6 +223,7 @@ function withAssignedMembershipLevel(formState) {
 const INITIAL_GREENFIELD_FORM_STATE = {
   basic_info: {
     name: "",
+    birth_date: "",
     target_company: "",
     target_role: "",
     job_requirements: "",
@@ -166,6 +250,61 @@ const REQUIRED_JOB_FIELD_LABELS = Object.freeze({
   target_company: "目标公司",
   target_role: "目标岗位",
   job_requirements: "岗位要求",
+});
+
+const FIELD_JUMP_CONFIG = Object.freeze({
+  greenfield: {
+    target_company: {
+      sectionId: "greenfield-job-target",
+      selectors: ['input[name="target_company"]'],
+    },
+    target_role: {
+      sectionId: "greenfield-job-target",
+      selectors: ['input[name="target_role"]'],
+    },
+    job_requirements: {
+      sectionId: "greenfield-job-target",
+      selectors: ['textarea[name="job_requirements"]'],
+    },
+    birth_date: {
+      sectionId: "greenfield-profile",
+      selectors: ['input[name="birth_date"]'],
+    },
+    email: {
+      sectionId: "greenfield-profile",
+      selectors: ['input[name="email"]'],
+    },
+    phone: {
+      sectionId: "greenfield-profile",
+      selectors: ['input[name="phone"]'],
+    },
+    full_name: {
+      sectionId: "greenfield-profile",
+      selectors: ['input[name="full_name"]', 'input[name="name"]'],
+    },
+    start_date: {
+      sectionId: "greenfield-education",
+      selectors: ['input[name="start_date"]'],
+    },
+    end_date: {
+      sectionId: "greenfield-education",
+      selectors: ['input[name="end_date"]'],
+    },
+  },
+  existing_resume: {
+    target_company: {
+      sectionId: "existing-job-target",
+      selectors: ['input[name="target_company"]'],
+    },
+    target_role: {
+      sectionId: "existing-job-target",
+      selectors: ['input[name="target_role"]'],
+    },
+    job_requirements: {
+      sectionId: "existing-job-target",
+      selectors: ['textarea[name="job_requirements"]'],
+    },
+  },
 });
 
 const GENERIC_JOB_INFO = Object.freeze({
@@ -196,11 +335,45 @@ function countFilledItems(items) {
   return (items || []).filter(hasContent).length;
 }
 
+function resolveItemDates(item) {
+  const startDate = normalizeMonthInput(item?.start_date || "");
+  const endDate = normalizeMonthInput(item?.end_date || "", { allowPresent: true });
+
+  if (startDate || endDate) {
+    return {
+      start_date: startDate,
+      end_date: endDate,
+    };
+  }
+
+  const cleaned = String(item?.duration || "").trim();
+  if (!cleaned) {
+    return { start_date: "", end_date: "" };
+  }
+
+  const monthMatches = cleaned.match(/\d{4}\s*(?:[-./年]\s*\d{1,2}\s*月?)/g) || [];
+  if (monthMatches.length >= 2) {
+    return {
+      start_date: normalizeMonthInput(monthMatches[0]),
+      end_date: normalizeMonthInput(monthMatches[1], { allowPresent: true }),
+    };
+  }
+
+  if (monthMatches.length === 1) {
+    return {
+      start_date: normalizeMonthInput(monthMatches[0]),
+      end_date: /至今|present|current|ongoing|now/i.test(cleaned) ? "至今" : "",
+    };
+  }
+
+  return { start_date: "", end_date: "" };
+}
+
 function toEducationPayload(items) {
   return (items || [])
     .filter(hasContent)
     .map((item) => {
-      const { start_date, end_date } = parseDuration(item.duration);
+      const { start_date, end_date } = resolveItemDates(item);
       return {
         school: item.school.trim(),
         degree: item.degree.trim(),
@@ -216,7 +389,7 @@ function toProjectPayload(items) {
   return (items || [])
     .filter(hasContent)
     .map((item) => {
-      const { start_date, end_date } = parseDuration(item.duration);
+      const { start_date, end_date } = resolveItemDates(item);
       return {
         name: item.name.trim(),
         role: item.role.trim(),
@@ -234,7 +407,7 @@ function toExperiencePayload(items) {
   return (items || [])
     .filter(hasContent)
     .map((item) => {
-      const { start_date, end_date } = parseDuration(item.duration);
+      const { start_date, end_date } = resolveItemDates(item);
       return {
         company: item.company.trim(),
         role: item.role.trim(),
@@ -258,6 +431,7 @@ function buildProfilePayload(formState) {
   return {
     basic_info: {
       name: formState.basic_info.name.trim(),
+      birth_date: (formState.basic_info.birth_date || "").trim(),
       target_company: formState.basic_info.target_company.trim(),
       target_role: formState.basic_info.target_role.trim(),
       job_requirements: formState.basic_info.job_requirements.trim(),
@@ -294,19 +468,11 @@ function downloadBlob(blob, fileName) {
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
-function normalizeResumeText(text) {
-  return (text || "")
-    .replace(/\r\n?/g, "\n")
-    .replace(/^\s{0,3}#{1,6}\s*/gm, "")
-    .replace(/^\s*>\s?/gm, "")
-    .replace(/^\s*[-*+]\s+/gm, "")
-    .replace(/^\s*\d+\.\s+/gm, "")
-    .replace(/^\s*([-*_]\s*){3,}$/gm, "")
-    .replace(/\*\*(.*?)\*\*/g, "$1")
-    .replace(/\*(.*?)\*/g, "$1")
-    .replace(/`([^`]+)`/g, "$1")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+function truncateText(value, maxLength = 96) {
+  const normalized = (value || "").replace(/\s+/g, " ").trim();
+  if (!normalized) return "";
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, maxLength).trim()}...`;
 }
 
 function buildResumeSnapshotTitle(targetCompany, targetRole) {
@@ -363,6 +529,17 @@ function getRequiredJobInfoError(jobInfo) {
   return `请先填写${missingEntry[1]}。如果只是先测试流程，也可以点击“套用通用岗位模板”。`;
 }
 
+function buildReadinessGapText(items) {
+  const pendingItems = (items || []).filter((item) => item?.applicable !== false && !item?.done);
+  if (pendingItems.length === 0) {
+    return "已满足当前执行条件";
+  }
+
+  const labels = pendingItems.slice(0, 2).map((item) => item.label);
+  const suffix = pendingItems.length > 2 ? " 等条件" : "";
+  return `还差 ${labels.join("、")}${suffix}`;
+}
+
 function getBoardIntroStatus(board) {
   return board === "existing_resume"
     ? "上传现有简历并按目标岗位要求执行优化。"
@@ -385,10 +562,36 @@ function buildQuestionCardCopy(mode) {
   };
 }
 
+function clampProgress(progress) {
+  const numericValue = Number(progress);
+  if (!Number.isFinite(numericValue)) return 0;
+  return Math.max(0, Math.min(1, numericValue));
+}
+
+function computeWeightedReadiness(segments) {
+  const applicableSegments = (segments || []).filter((segment) => segment?.applicable !== false);
+  const totalWeight = applicableSegments.reduce(
+    (sum, segment) => sum + Math.max(0, Number(segment?.weight) || 0),
+    0,
+  );
+
+  if (!totalWeight) {
+    return 0;
+  }
+
+  const completedWeight = applicableSegments.reduce(
+    (sum, segment) =>
+      sum + clampProgress(segment?.progress) * Math.max(0, Number(segment?.weight) || 0),
+    0,
+  );
+
+  return Math.max(0, Math.min(100, Math.round((completedWeight / totalWeight) * 100)));
+}
+
 export default function App() {
   const [activeBoard, setActiveBoard] = useState("greenfield");
   const [activeInfoPage, setActiveInfoPage] = useState(null);
-  const [modeDialogOpen, setModeDialogOpen] = useState(true);
+  const [modeDialogOpen, setModeDialogOpen] = useState(false);
   const [greenfieldFormState, setGreenfieldFormState] = useState(() =>
     cloneFormState(INITIAL_GREENFIELD_FORM_STATE),
   );
@@ -413,6 +616,26 @@ export default function App() {
   const [recordPreview, setRecordPreview] = useState(() => buildRecordPreviewState());
   const [sessionUsername, setSessionUsername] = useState("ft");
   const [liveStreamState, setLiveStreamState] = useState(() => createEmptyLiveStreamState());
+  const [jsonModalOpen, setJsonModalOpen] = useState(false);
+  const [historyDrawerOpen, setHistoryDrawerOpen] = useState(false);
+  const [semanticAtsState, setSemanticAtsState] = useState(() => ({
+    status: "idle",
+    result: null,
+    warning: "",
+  }));
+  const [ragInsightsState, setRagInsightsState] = useState(() => ({
+    status: "idle",
+    count: 0,
+    mode: "idle",
+    results: [],
+    warning: "",
+  }));
+  const [jobInsightState, setJobInsightState] = useState(() => ({
+    status: "idle",
+    data: null,
+  }));
+  const [jobInsightDrawerOpen, setJobInsightDrawerOpen] = useState(false);
+  const [pendingFieldJump, setPendingFieldJump] = useState(null);
 
   const lastSavedDraftHashRef = useRef("");
   const draftSaveInFlightRef = useRef(false);
@@ -429,6 +652,112 @@ export default function App() {
     activeBoard === "existing_resume" ? existingResumeWorkspace : greenfieldWorkspace;
   const activeJobInfo =
     activeBoard === "existing_resume" ? existingFormState : greenfieldFormState.basic_info;
+
+  function resolveFieldJumpTarget(jumpRequest) {
+    if (!jumpRequest) {
+      return null;
+    }
+
+    const boardConfig = FIELD_JUMP_CONFIG[jumpRequest.board] || {};
+    const fieldConfig = boardConfig[jumpRequest.field] || {};
+    const selectors =
+      fieldConfig.selectors?.length > 0
+        ? fieldConfig.selectors
+        : [`input[name="${jumpRequest.field}"]`, `textarea[name="${jumpRequest.field}"]`];
+
+    for (const selector of selectors) {
+      const element = document.querySelector(selector);
+      if (element) {
+        return {
+          type: "field",
+          node: element,
+        };
+      }
+    }
+
+    if (fieldConfig.sectionId) {
+      const section = document.getElementById(fieldConfig.sectionId);
+      if (section) {
+        return {
+          type: "section",
+          node: section,
+        };
+      }
+    }
+
+    return null;
+  }
+
+  function executeFieldJump(jumpRequest) {
+    const target = resolveFieldJumpTarget(jumpRequest);
+    if (!target) {
+      console.error("[跳转] 未找到字段或分区:", jumpRequest?.field);
+      return false;
+    }
+
+    console.log("[跳转] 已定位目标:", jumpRequest.field, target.type);
+    target.node.scrollIntoView({
+      behavior: "smooth",
+      block: target.type === "field" ? "center" : "start",
+    });
+
+    if (target.type === "field") {
+      window.setTimeout(() => {
+        target.node.focus?.();
+        if (typeof target.node.select === "function") {
+          target.node.select();
+        }
+      }, 240);
+    }
+
+    return true;
+  }
+
+  function handleJumpToField(fieldName) {
+    const jumpRequest = {
+      board: activeBoard,
+      field: fieldName,
+    };
+
+    console.log("[跳转] 收到跳转请求:", jumpRequest);
+    setPendingFieldJump(jumpRequest);
+
+    if (activeInfoPage !== activeBoard) {
+      handleOpenInfoPage(activeBoard);
+    }
+  }
+
+  useEffect(() => {
+    if (!pendingFieldJump || activeInfoPage !== pendingFieldJump.board) {
+      return undefined;
+    }
+
+    let timerId = 0;
+    let attempts = 0;
+
+    const tryJump = () => {
+      const success = executeFieldJump(pendingFieldJump);
+      if (success) {
+        setPendingFieldJump(null);
+        return;
+      }
+
+      attempts += 1;
+      if (attempts >= 8) {
+        console.error("[跳转] 多次重试后仍未找到目标:", pendingFieldJump.field);
+        setPendingFieldJump(null);
+        return;
+      }
+
+      timerId = window.setTimeout(tryJump, 180);
+    };
+
+    timerId = window.setTimeout(tryJump, 120);
+
+    return () => {
+      window.clearTimeout(timerId);
+    };
+  }, [activeInfoPage, pendingFieldJump]);
 
   async function refreshMemory() {
     const data = await fetchMemory();
@@ -595,6 +924,9 @@ export default function App() {
     liveStreamAbortRef.current?.abort?.();
     resetResumeReveal();
     setLiveStreamState(createEmptyLiveStreamState());
+    setJsonModalOpen(false);
+    setJobInsightDrawerOpen(false);
+    setHistoryDrawerOpen(false);
     setActiveBoard(nextBoard);
     setActiveInfoPage(null);
     setQuestionsOpen(false);
@@ -615,6 +947,9 @@ export default function App() {
   function handleOpenInfoPage(board = activeBoard) {
     setActiveBoard(board);
     setActiveInfoPage(board);
+    setJsonModalOpen(false);
+    setJobInsightDrawerOpen(false);
+    setHistoryDrawerOpen(false);
     setQuestionsOpen(false);
     closeRecordPreview();
   }
@@ -746,6 +1081,54 @@ export default function App() {
     }
   }
 
+  async function refreshJobInsight({ forceRefresh = false, board = activeBoard } = {}) {
+    const jobInfo = board === "existing_resume" ? existingFormState : greenfieldFormState.basic_info;
+    const targetCompany = jobInfo?.target_company?.trim() || "";
+    const targetRole = jobInfo?.target_role?.trim() || "";
+    const jobRequirements = jobInfo?.job_requirements?.trim() || "";
+
+    if (backendStatus?.status !== "ok" || !targetCompany || !targetRole) {
+      setJobInsightState({
+        status: "idle",
+        data: null,
+      });
+      return null;
+    }
+
+    setJobInsightState((previous) => ({
+      ...previous,
+      status: "loading",
+    }));
+
+    try {
+      const result = await searchJobContext({
+        target_company: targetCompany,
+        target_role: targetRole,
+        job_requirements: jobRequirements,
+        force_refresh: forceRefresh,
+      });
+      setJobInsightState({
+        status: "ready",
+        data: result,
+      });
+      return result;
+    } catch (error) {
+      const fallbackResult = {
+        query: [targetCompany, targetRole].filter(Boolean).join(" "),
+        provider: "tavily",
+        mode: "error",
+        cached: false,
+        results: [],
+        warning: error?.message || "岗位情报搜索失败，当前仅基于已填写岗位信息继续执行。",
+      };
+      setJobInsightState({
+        status: "error",
+        data: fallbackResult,
+      });
+      return fallbackResult;
+    }
+  }
+
   useEffect(() => {
     async function bootstrap() {
       try {
@@ -795,6 +1178,15 @@ export default function App() {
           });
         }
       } catch (error) {
+        setBackendStatus({
+          status: "offline",
+          configured: false,
+          ai_available: false,
+          provider: "",
+          base_url: "",
+          model: "",
+          wire_api: "",
+        });
         setStatusText(`本地服务未连接：${error.message}。请先启动服务后再试。`);
       } finally {
         setWorkspaceReady(true);
@@ -823,6 +1215,198 @@ export default function App() {
 
     return () => window.clearInterval(timer);
   }, [backendStatus, greenfieldFormState, workspaceReady]);
+
+  useEffect(() => {
+    const resumeText = activeBoard === "existing_resume"
+      ? activeWorkspace.resume_text.trim() || existingFormState.resume_source_text.trim()
+      : activeWorkspace.resume_text.trim();
+    const jobDescription = [
+      activeJobInfo?.target_role,
+      activeJobInfo?.target_company,
+      activeJobInfo?.job_requirements,
+    ]
+      .map((value) => value?.trim?.() || "")
+      .filter(Boolean)
+      .join("\n")
+      .trim();
+
+    if (backendStatus?.status !== "ok" || !resumeText || !jobDescription) {
+      setSemanticAtsState({
+        status: "idle",
+        result: null,
+        warning: "",
+      });
+      return undefined;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      setSemanticAtsState((previous) => ({
+        ...previous,
+        status: "loading",
+      }));
+
+      try {
+        const result = await scoreSemanticAts({
+          resume_text: resumeText,
+          job_description: jobDescription,
+        });
+
+        if (cancelled) return;
+        setSemanticAtsState({
+          status: "ready",
+          result,
+          warning: result.warning || "",
+        });
+      } catch (error) {
+        if (cancelled) return;
+        setSemanticAtsState({
+          status: "fallback",
+          result: null,
+          warning: error?.message || "语义 ATS 评分失败，已回退到本地评分。",
+        });
+      }
+    }, 280);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    activeBoard,
+    backendStatus?.status,
+    activeWorkspace.resume_text,
+    activeJobInfo?.target_company,
+    activeJobInfo?.target_role,
+    activeJobInfo?.job_requirements,
+    existingFormState.resume_source_text,
+  ]);
+
+  useEffect(() => {
+    const query = [activeJobInfo?.target_role, activeJobInfo?.job_requirements]
+      .map((value) => value?.trim?.() || "")
+      .filter(Boolean)
+      .join("\n")
+      .trim();
+
+    if (backendStatus?.status !== "ok" || !query) {
+      setRagInsightsState({
+        status: "idle",
+        count: 0,
+        mode: "idle",
+        results: [],
+        warning: "",
+      });
+      return undefined;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      setRagInsightsState((previous) => ({
+        ...previous,
+        status: "loading",
+      }));
+
+      try {
+        const result = await searchRagReferences({
+          query,
+          top_k: 4,
+        });
+
+        if (cancelled) return;
+        setRagInsightsState({
+          status: "ready",
+          count: result.count || 0,
+          mode: result.mode || "empty",
+          results: result.results || [],
+          warning: result.warning || "",
+        });
+      } catch (error) {
+        if (cancelled) return;
+        setRagInsightsState({
+          status: "fallback",
+          count: 0,
+          mode: "error",
+          results: [],
+          warning: error?.message || "中文参考库检索失败。",
+        });
+      }
+    }, 320);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    backendStatus?.status,
+    activeJobInfo?.target_role,
+    activeJobInfo?.job_requirements,
+  ]);
+
+  useEffect(() => {
+    const jobInfo = activeBoard === "existing_resume" ? existingFormState : greenfieldFormState.basic_info;
+    const targetCompany = jobInfo?.target_company?.trim() || "";
+    const targetRole = jobInfo?.target_role?.trim() || "";
+    const jobRequirements = jobInfo?.job_requirements?.trim() || "";
+
+    if (backendStatus?.status !== "ok" || !targetCompany || !targetRole) {
+      setJobInsightState({
+        status: "idle",
+        data: null,
+      });
+      return undefined;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      setJobInsightState((previous) => ({
+        ...previous,
+        status: "loading",
+      }));
+
+      try {
+        const result = await searchJobContext({
+          target_company: targetCompany,
+          target_role: targetRole,
+          job_requirements: jobRequirements,
+          force_refresh: false,
+        });
+
+        if (cancelled) return;
+        setJobInsightState({
+          status: "ready",
+          data: result,
+        });
+      } catch (error) {
+        if (cancelled) return;
+        setJobInsightState({
+          status: "error",
+          data: {
+            query: [targetCompany, targetRole].filter(Boolean).join(" "),
+            provider: "tavily",
+            mode: "error",
+            cached: false,
+            results: [],
+            warning: error?.message || "岗位情报搜索失败，当前仅基于已填写岗位信息继续执行。",
+          },
+        });
+      }
+    }, 360);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    activeBoard,
+    backendStatus?.status,
+    existingFormState.target_company,
+    existingFormState.target_role,
+    existingFormState.job_requirements,
+    greenfieldFormState.basic_info.target_company,
+    greenfieldFormState.basic_info.target_role,
+    greenfieldFormState.basic_info.job_requirements,
+  ]);
 
   function updateGreenfieldBasicInfo(field, value) {
     setGreenfieldFormState((previous) => ({
@@ -907,6 +1491,10 @@ export default function App() {
       board: "greenfield",
       active: true,
       status: "正在锁定数据契约并启动 AI 流式生成...",
+      phase: "search",
+      step: 1,
+      totalSteps: 6,
+      meta: null,
       partial_result: null,
       raw_json: "",
       error: "",
@@ -923,6 +1511,15 @@ export default function App() {
               ...previous,
               board: "greenfield",
               status: payload?.message || previous.status,
+              phase: payload?.phase || previous.phase,
+              step: typeof payload?.step === "number" ? payload.step : previous.step,
+              totalSteps:
+                typeof payload?.total_steps === "number"
+                  ? payload.total_steps
+                  : typeof payload?.totalSteps === "number"
+                    ? payload.totalSteps
+                    : previous.totalSteps,
+              meta: payload?.meta || previous.meta,
             }));
           },
           onPartial: (partialResult, rawJson) => {
@@ -1160,6 +1757,10 @@ export default function App() {
       board: "existing_resume",
       active: true,
       status: "正在锁定数据契约并启动 AI 流式生成...",
+      phase: "search",
+      step: 1,
+      totalSteps: 6,
+      meta: null,
       partial_result: null,
       raw_json: "",
       error: "",
@@ -1183,6 +1784,15 @@ export default function App() {
               ...previous,
               board: "existing_resume",
               status: payload?.message || previous.status,
+              phase: payload?.phase || previous.phase,
+              step: typeof payload?.step === "number" ? payload.step : previous.step,
+              totalSteps:
+                typeof payload?.total_steps === "number"
+                  ? payload.total_steps
+                  : typeof payload?.totalSteps === "number"
+                    ? payload.totalSteps
+                    : previous.totalSteps,
+              meta: payload?.meta || previous.meta,
             }));
           },
           onPartial: (partialResult, rawJson) => {
@@ -1381,6 +1991,11 @@ export default function App() {
       return;
     }
 
+    if (!activeWorkspace.revision_instruction.trim()) {
+      setStatusText("请先填写 AI 改写指令，再执行结构化修订。");
+      return;
+    }
+
     const requiredJobInfoError =
       activeBoard === "existing_resume"
         ? getRequiredJobInfoError(existingFormState)
@@ -1432,10 +2047,12 @@ export default function App() {
     setLoadingAction("save");
     try {
       const snapshot = await saveResumeSnapshot({
+        title: activeWorkspace.title || buildResumeSnapshotTitle(activeJobInfo.target_company, activeJobInfo.target_role),
         target_company: activeJobInfo.target_company,
         target_role: activeJobInfo.target_role,
         resume_text: activeWorkspace.resume_text,
         generation_mode: activeWorkspace.generation_mode || "manual_preserve",
+        analysis_notes: activeWorkspace.analysis_notes || [],
       });
       const snapshotTime = snapshot.timestamp ? new Date(snapshot.timestamp).toLocaleString() : "刚刚";
       setStatusText(
@@ -1504,9 +2121,12 @@ export default function App() {
 
     updateWorkspace(activeBoard, (previous) => ({
       ...previous,
-      title: restoredTitle,
+      title: snapshot?.title?.trim() || restoredTitle,
       resume_text: restoredText,
       generation_mode: snapshot.generation_mode || "fallback",
+      analysis_notes: Array.isArray(snapshot?.analysis_notes)
+        ? snapshot.analysis_notes
+        : previous.analysis_notes,
     }));
 
     setStatusText(
@@ -1671,19 +2291,58 @@ export default function App() {
   const questionCardCopy = buildQuestionCardCopy(questionFlowMode);
   const currentModeLabel = BOARD_LABELS[activeBoard] || BOARD_LABELS.greenfield;
   const currentModelLabel = modelStatus?.model || backendStatus?.model || "未配置";
+  const isLocalFallbackReady =
+    modelStatus?.status === "fallback_only" ||
+    (!modelStatusLoading && backendStatus?.status === "ok" && !backendStatus?.ai_available);
   const modelLatencyLabel =
-    typeof modelStatus?.latency_ms === "number" ? `${modelStatus.latency_ms} ms` : "未返回";
+    typeof modelStatus?.latency_ms === "number"
+      ? `${modelStatus.latency_ms} ms`
+      : modelStatusLoading
+        ? "检测中..."
+        : isLocalFallbackReady
+          ? "本地模式"
+        : backendStatus?.status === "ok"
+          ? "待检测"
+          : "不可用";
   const modelCheckedLabel = modelStatus?.checked_at
     ? new Date(modelStatus.checked_at).toLocaleTimeString()
-    : "未检测";
-  const lastStartedLabel = memory?.last_started_at
-    ? new Date(memory.last_started_at).toLocaleString()
-    : "尚未记录";
-  const backendSummaryLabel = backendStatus?.status === "ok" ? "服务在线" : "服务待连接";
-  const aiSummaryLabel = backendStatus?.ai_available ? "AI 服务可用" : "本地生成模式";
-  const modelAvailability = Boolean(modelStatus?.reachable);
-  const modelTestLabel = modelStatusLoading ? "测试中..." : "手动测试";
-  const modelCardMeta = `延迟 ${modelLatencyLabel} · 最近检测 ${modelCheckedLabel}`;
+    : modelStatusLoading
+      ? "检测中..."
+      : "未检测";
+  const modelAvailability =
+    typeof modelStatus?.reachable === "boolean"
+      ? modelStatus.reachable
+      : Boolean(backendStatus?.ai_available);
+  const modelStatusTone =
+    modelStatusLoading
+      ? "pending"
+      : isLocalFallbackReady
+        ? "local"
+        : modelAvailability
+        ? "healthy"
+        : "error";
+  const modelHealthLabel =
+    modelStatusTone === "healthy"
+      ? "运行正常"
+      : modelStatusTone === "local"
+        ? "本地演示"
+      : modelStatusTone === "error"
+        ? "连接异常"
+        : "检测中";
+  const modelAvailabilityLabel =
+    modelStatusTone === "healthy"
+      ? "云端可用"
+      : modelStatusTone === "local"
+        ? "本地可用"
+        : "不可用";
+  const modelStatusHint =
+    modelStatusTone === "local"
+      ? "当前未配置云端模型密钥，系统已切换到本地兜底演示模式。简历生成、改写、导出、历史恢复等核心流程仍可验证；如需实时 AI，只需在 backend/.env 中填写受限演示密钥。"
+      : modelStatusTone === "error"
+      ? modelStatus?.error || "模型探测失败，请检查后端配置或接口连通性。"
+      : modelStatusTone === "pending"
+        ? "正在重新探测模型可用性与接口延迟。"
+        : "手动刷新后会重新探测当前模型与接口延迟。";
 
   const hasPendingQuestionsForActiveBoard =
     questions.length > 0 && questionFlowMode === activeBoard;
@@ -1703,8 +2362,12 @@ export default function App() {
     ...greenfieldFormState.projects,
     ...greenfieldFormState.experiences,
   ].filter((item) => item.attachment_name).length;
+  const greenfieldProfileReady = greenfieldProfileFieldCount > 0;
+  const greenfieldStructuredReady = greenfieldStructuredCount > 0;
+  const greenfieldFollowupApplicable = hasPendingQuestionsForActiveBoard;
   const existingResumeReady = Boolean(existingFormState.resume_source_text.trim());
   const existingAnswerCount = existingFormState.additional_answers.length;
+  const existingFollowupApplicable = hasPendingQuestionsForActiveBoard;
   const accountMembershipLabel =
     MEMBERSHIP_LEVEL_LABELS[greenfieldFormState.membership_level] || "高级用户";
   const accountBalanceLabel = `¥ ${MOCK_ACCOUNT_ENTITLEMENTS.balance.toFixed(2)}`;
@@ -1715,56 +2378,77 @@ export default function App() {
     (mode) => BILLING_MODE_LABELS[mode] || mode,
   );
 
-  const workspaceEntryTitle =
-    activeBoard === "existing_resume" ? "优化资料录入" : "新建简历资料录入";
-  const workspaceEntryDescription =
-    activeBoard === "existing_resume"
-      ? "请先进入资料录入页，完善岗位信息并上传现有简历后再执行优化。"
-      : "请先进入资料录入页，完善岗位信息与候选人资料后再生成简历。";
-  const workspaceEntryButtonLabel = "进入资料录入";
-  const greenfieldReadiness = Math.min(
-    100,
-    Math.round(
-      (greenfieldJobInfoReady ? 38 : 0) +
-        (Math.min(greenfieldProfileFieldCount, 6) / 6) * 24 +
-        (Math.min(greenfieldStructuredCount, 3) / 3) * 26 +
-        (Math.min(greenfieldAttachmentCount, 2) / 2) * 12,
-    ),
-  );
-  const existingReadiness = Math.min(
-    100,
-    Math.round(
-      (existingJobInfoReady ? 45 : 0) +
-        (existingResumeReady ? 40 : 0) +
-        (Math.min(existingAnswerCount, 2) / 2) * 15,
-    ),
-  );
+  const greenfieldReadiness = computeWeightedReadiness([
+    { weight: 40, progress: greenfieldJobInfoReady ? 1 : 0 },
+    { weight: 30, progress: greenfieldProfileReady ? 1 : 0 },
+    {
+      weight: 30,
+      progress: greenfieldStructuredReady ? 1 : 0,
+    },
+    {
+      weight: 15,
+      progress: hasPendingQuestionsForActiveBoard ? 0 : 1,
+      applicable: greenfieldFollowupApplicable,
+    },
+  ]);
+  const existingReadiness = computeWeightedReadiness([
+    { weight: 45, progress: existingJobInfoReady ? 1 : 0 },
+    { weight: 40, progress: existingResumeReady ? 1 : 0 },
+    {
+      weight: 15,
+      progress: hasPendingQuestionsForActiveBoard ? 0 : 1,
+      applicable: existingFollowupApplicable,
+    },
+  ]);
   const activeReadiness =
     activeBoard === "existing_resume" ? existingReadiness : greenfieldReadiness;
+  const existingReadinessChecklist = [
+    {
+      label: "岗位锚点",
+      done: existingJobInfoReady,
+    },
+    {
+      label: "原始简历",
+      done: existingResumeReady,
+    },
+    {
+      label: "补充追问",
+      done: !hasPendingQuestionsForActiveBoard,
+      applicable: existingFollowupApplicable,
+    },
+  ];
+  const greenfieldReadinessChecklist = [
+    {
+      label: "岗位锚点",
+      done: greenfieldJobInfoReady,
+    },
+    {
+      label: "候选人基础资料",
+      done: greenfieldProfileReady,
+    },
+    {
+      label: "经历或项目素材",
+      done: greenfieldStructuredReady,
+    },
+    {
+      label: "补充追问",
+      done: !hasPendingQuestionsForActiveBoard,
+      applicable: greenfieldFollowupApplicable,
+    },
+  ];
+  const activeReadinessChecklist =
+    activeBoard === "existing_resume" ? existingReadinessChecklist : greenfieldReadinessChecklist;
+  const activeReadinessGap = buildReadinessGapText(activeReadinessChecklist);
   const activeReadinessTone =
     activeReadiness >= 80 ? "可执行" : activeReadiness >= 50 ? "准备中" : "待整理";
   const activeReadinessDescription =
     activeBoard === "existing_resume"
-      ? "岗位锚点与原始简历越完整，优化结果越接近目标职位。"
-      : "岗位信息、候选人素材和附件上下文越完整，生成草稿越稳。";
-  const primaryWorkspaceActionLabel =
-    activeBoard === "existing_resume"
-      ? liveStreamState.active
-        ? "流式优化进行中..."
-        : "开始流式优化"
-      : loadingAction === "generate"
-        ? "生成中..."
-        : "生成简历";
+      ? "岗位锚点、原始简历和追问回答都满足后，优化进度会直接到 100%。"
+      : "新建简历只按可见必需条件计分，附件不会再无故压低进度。";
   const primaryWorkspaceActionDisabled =
     activeBoard === "existing_resume"
       ? loading || !existingJobInfoReady || !existingResumeReady
       : loading || !greenfieldJobInfoReady;
-  const workspaceCommandTitle =
-    activeBoard === "existing_resume" ? "流式监控面板" : "生成状态面板";
-  const workspaceCommandDescription =
-    activeBoard === "existing_resume"
-      ? "开始流式优化后，这里会持续显示状态变化和结构化 JSON 片段，方便确认它不是一次性返回。"
-      : "这里用于查看生成前后的工作区状态，主生成按钮已经移动到右侧资料录入卡片旁边。";
   const liveStreamSnippet = liveStreamState.raw_json
     ? liveStreamState.raw_json.slice(-1200)
     : "";
@@ -1895,6 +2579,19 @@ export default function App() {
   const activeQuestionCount =
     activeContractReport?.question_count ??
     (hasPendingQuestionsForActiveBoard ? questions.length : 0);
+  const activeContractSource = activeContractReport?.source || "";
+  const activeContractWarning = activeContractReport?.warning?.trim() || "";
+  const activeContractSourceLabel =
+    activeContractSource === "fallback"
+      ? "回退 Contract"
+      : activeContractReport?.validated
+        ? "模型 Contract"
+        : "待校验";
+  const activeContractHealthLabel = activeContractReport
+    ? activeContractReport.llm_contract_ok
+      ? "LLM Contract 正常"
+      : "已触发回退"
+    : "等待校验";
   const workspaceMonitorLabel = isActiveBoardStreaming
     ? "流式写入中"
     : activeBoard === "existing_resume"
@@ -1955,610 +2652,480 @@ export default function App() {
     },
   ];
 
-  return (
-    <div className="app-shell min-h-screen px-4 py-6 lg:px-8">
-      <div className="mx-auto max-w-[1580px] dashboard-grid">
-        <header className="dashboard-hero">
-          <div className="dashboard-hero__intro">
-            <span className="dashboard-badge">Career Atelier</span>
-            <h1 className="dashboard-title">智能简历工作台</h1>
-            <p className="dashboard-description">
-              像整理一份候选人档案一样围绕目标岗位生成或优化简历，在工作台中持续查看正文结果，并进入资料录入与留档。
-            </p>
+  const activeResumeSeedText = activeStructuredResume
+    ? renderStructuredResumeText(activeStructuredResume)
+    : "";
+  const activeScoringResumeText = activeWorkspace.resume_text.trim()
+    ? activeWorkspace.resume_text
+    : activeResumeSeedText;
+  const activeAtsJobDescription = [
+    activeJobInfo?.target_role,
+    activeJobInfo?.target_company,
+    activeJobInfo?.job_requirements,
+  ]
+    .map((value) => value?.trim?.() || "")
+    .filter(Boolean)
+    .join("\n");
+  const hasAtsJobDescription = Boolean(activeJobInfo?.job_requirements?.trim());
+  const activeAtsResumeData =
+    activeBoard === "existing_resume"
+      ? activeScoringResumeText.trim()
+        ? {
+            structured_resume: activeStructuredResume || null,
+            resume_text: activeScoringResumeText,
+          }
+        : existingFormState.resume_source_text.trim()
+          ? {
+              resume_text: existingFormState.resume_source_text,
+            }
+          : null
+      : activeScoringResumeText.trim()
+        ? {
+            structured_resume: activeStructuredResume || null,
+            resume_text: activeScoringResumeText,
+          }
+        : null;
+  const localAtsResult =
+    activeAtsResumeData && hasAtsJobDescription && activeAtsJobDescription.trim()
+      ? calculateATSScore(activeAtsResumeData, activeAtsJobDescription)
+      : null;
+  const activeAtsResult = semanticAtsState.result || localAtsResult;
+  const activeAtsMeta = activeAtsResult
+    ? {
+        scoreModeLabel:
+          semanticAtsState.result?.mode === "embedding"
+            ? "语义嵌入评分"
+            : semanticAtsState.result?.mode === "lexical_fallback"
+              ? "语义回退评分"
+              : "本地关键词评分",
+        providerLabel: semanticAtsState.result?.model
+          ? `${semanticAtsState.result.provider} / ${semanticAtsState.result.model}`
+          : semanticAtsState.result?.provider || "local",
+        semanticSimilarity:
+          typeof semanticAtsState.result?.semanticSimilarity === "number"
+            ? semanticAtsState.result.semanticSimilarity
+            : null,
+        keywordCoverage:
+          typeof semanticAtsState.result?.keywordCoverage === "number"
+            ? semanticAtsState.result.keywordCoverage
+            : null,
+        ragHitCount: ragInsightsState.count || 0,
+        ragModeLabel:
+          ragInsightsState.mode === "semantic"
+            ? "语义检索"
+            : ragInsightsState.mode === "lexical_fallback"
+              ? "词法回退"
+              : ragInsightsState.mode === "empty"
+                ? "暂无命中"
+                : ragInsightsState.mode === "disabled"
+                  ? "未启用"
+                  : "待检索",
+        warning: semanticAtsState.warning || ragInsightsState.warning || "",
+      }
+    : null;
+  const atsEmptyStateCopy = !activeJobInfo?.job_requirements?.trim()
+    ? "先补充岗位 JD，ATS 才能判断关键词覆盖和岗位匹配度。"
+    : activeBoard === "existing_resume"
+      ? existingResumeReady
+        ? "正在等待可评分的简历内容。上传后可先对原始简历打分，优化后会继续实时刷新。"
+        : "上传或粘贴现有简历后，这里会显示 ATS 分数、命中关键词和缺失关键词。"
+      : "先生成简历草稿，ATS 才会基于当前结果给出匹配分数和改进建议。";
+  const activeSummaryItems =
+    activeBoard === "existing_resume"
+      ? [
+          {
+            label: "目标公司",
+            value: activeJobInfo?.target_company?.trim() || "未填写",
+            meta: "仅在专门的信息编辑页修改",
+          },
+          {
+            label: "目标岗位",
+            value: activeJobInfo?.target_role?.trim() || "未填写",
+            meta: "下一轮优化的核心锚点",
+          },
+          {
+            label: "JD 摘要",
+            value: truncateText(activeJobInfo?.job_requirements || "", 88) || "未填写",
+            meta: "ATS 评分和优化都会读取这一段",
+          },
+          {
+            label: "原始简历",
+            value:
+              existingFormState.resume_source_name ||
+              (existingFormState.resume_source_text.trim()
+                ? `${existingFormState.resume_source_text.trim().length} 字符`
+                : "尚未上传"),
+            meta: `已保存 ${existingAnswerCount} 条追问回答`,
+          },
+        ]
+      : [
+          {
+            label: "目标公司",
+            value: activeJobInfo?.target_company?.trim() || "未填写",
+            meta: "仅在专门的信息编辑页修改",
+          },
+          {
+            label: "目标岗位",
+            value: activeJobInfo?.target_role?.trim() || "未填写",
+            meta: "下一轮生成的核心目标",
+          },
+          {
+            label: "JD 摘要",
+            value: truncateText(activeJobInfo?.job_requirements || "", 88) || "未填写",
+            meta: "ATS 评分会优先读取这一段",
+          },
+          {
+            label: "候选素材",
+            value: `${greenfieldProfileFieldCount + greenfieldStructuredCount} 项信号`,
+            meta: `已关联 ${greenfieldAttachmentCount} 个附件`,
+          },
+        ];
+  const editAnchorItems =
+    activeInfoPage === "existing_resume"
+      ? [
+          { id: "existing-job-target", label: "目标岗位", meta: "公司、岗位与 JD", index: "01" },
+          { id: "existing-status", label: "资料状态", meta: "输入状态与追问回答", index: "02" },
+          { id: "existing-source", label: "原始简历", meta: "上传或粘贴待优化简历", index: "03" },
+        ]
+      : [
+          { id: "greenfield-job-target", label: "目标岗位", meta: "公司、岗位与 JD", index: "01" },
+          { id: "greenfield-management", label: "工作区设置", meta: "保存、恢复与模块管理", index: "02" },
+          { id: "greenfield-profile", label: "基础资料", meta: "候选人基本信息", index: "03" },
+          { id: "greenfield-skills", label: "技能清单", meta: "技能库存", index: "04" },
+          { id: "greenfield-education", label: "教育背景", meta: "学校与亮点", index: "05" },
+          { id: "greenfield-projects", label: "项目经历", meta: "项目证明与附件", index: "06" },
+          { id: "greenfield-experiences", label: "工作经历", meta: "履历与成果表达", index: "07" },
+        ];
+  const liveJsonContent = liveStreamSnippet || workspaceMonitorJsonFallback;
+  const workspaceStatusTone = isActiveBoardStreaming
+    ? "流式生成中"
+    : loading
+      ? "处理中"
+      : hasPendingQuestionsForActiveBoard
+        ? "待补充回答"
+        : "已就绪";
+  const dashboardResultTitle =
+    activeWorkspace.title ||
+    (activeBoard === "existing_resume" ? "优化简历草稿" : "生成简历草稿");
+  const infoPageHeading =
+    activeInfoPage === "existing_resume" ? "沉浸式简历优化编辑" : "沉浸式候选人资料编辑";
+  const infoPageDescription =
+    activeInfoPage === "existing_resume"
+      ? "这个模式只处理目标岗位信息和原始简历。ATS、JSON 和系统状态会留在工作台，不在这里干扰你。"
+      : "这个模式只处理目标岗位和候选人素材。主工作台保持预览优先，不再堆叠表单。";
+  const activeStreamStatusText =
+    liveStreamState.board === activeBoard ? liveStreamState.status : "";
+  const activeStreamStepText = getStreamStepText(liveStreamState, activeBoard);
+  const activeStreamActivities = buildStreamActivityItems(liveStreamState, activeBoard);
+  const primaryActionCta =
+    activeBoard === "existing_resume"
+      ? isActiveBoardStreaming
+        ? "优化中..."
+        : "开始优化"
+      : loadingAction === "generate"
+        ? "生成中..."
+        : "生成简历";
 
-            <div className="dashboard-ledger" aria-label="当前工作流步骤">
-              {activeFlowSteps.map((step) => (
-                <div key={step.index} className="dashboard-ledger__item">
-                  <span className="dashboard-ledger__index">{step.index}</span>
-                  <div>
-                    <p className="dashboard-ledger__title">{step.title}</p>
-                    <p className="dashboard-ledger__meta">{step.detail}</p>
-                  </div>
-                </div>
-              ))}
+  return (
+    <div className="atelier-app-shell w-full h-screen flex overflow-hidden bg-gray-50 text-gray-900">
+      <WorkspaceSidebar
+        sessionUsername={sessionUsername}
+        currentModeLabel={currentModeLabel}
+        accountBalanceLabel={accountBalanceLabel}
+        accountPointsLabel={accountPointsLabel}
+        accountMembershipLabel={accountMembershipLabel}
+        currentBillingModeLabel={currentBillingModeLabel}
+        currentModelLabel={currentModelLabel}
+        modelAvailability={modelAvailability}
+        modelAvailabilityLabel={modelAvailabilityLabel}
+        modelStatusTone={modelStatusTone}
+        modelHealthLabel={modelHealthLabel}
+        modelLatencyLabel={modelLatencyLabel}
+        modelCheckedLabel={modelCheckedLabel}
+        modelStatusHint={modelStatusHint}
+        modelStatusLoading={modelStatusLoading}
+        onRefreshModel={refreshModelStatus}
+      />
+
+      <div className="flex-1 flex flex-col h-screen overflow-hidden">
+        <header className="atelier-header h-16 shrink-0 border-b border-gray-200 bg-white px-6">
+          <div className="flex h-full items-center justify-between gap-4">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-gray-900">
+                {activeInfoPage ? "编辑模式" : "工作台"} - {currentModeLabel}
+              </p>
+              <p className="truncate text-xs text-gray-500">
+                当前进度 {activeReadiness}% · {activeReadinessGap} · 正文{" "}
+                {activeResumeLength > 0 ? `${activeResumeLength} 字符` : "尚未生成"} · {workspaceStatusTone}
+              </p>
             </div>
 
-            <section className="dashboard-readiness" aria-label="资料准备度">
-              <div className="dashboard-readiness__head">
-                <div>
-                  <p className="dashboard-readiness__label">资料准备度</p>
-                  <p className="dashboard-readiness__meta">{activeReadinessDescription}</p>
-                </div>
-                <div className="dashboard-readiness__score">
-                  <strong>{activeReadiness}%</strong>
-                  <span>{activeReadinessTone}</span>
-                </div>
-              </div>
-              <div className="dashboard-readiness__track" aria-hidden="true">
-                <span
-                  className="dashboard-readiness__fill"
-                  style={{ width: `${activeReadiness}%` }}
-                />
-              </div>
-            </section>
-
-            <div className="dashboard-hero__actions">
-              <div className="mt-4 flex flex-wrap gap-2">
-                <span className="chip accent-chip">{backendSummaryLabel}</span>
-                <span className="chip">{aiSummaryLabel}</span>
-                <span className="chip">最近启动：{lastStartedLabel}</span>
-                <span className="chip">
-                  当前追问：{hasPendingQuestionsForActiveBoard ? questions.length : 0}
-                </span>
-              </div>
-
-              <div className="mode-switch">
+            <div className="flex items-center gap-2 overflow-x-auto pb-1">
+              <div className="inline-flex rounded-full border border-gray-200 bg-gray-50 p-1">
                 <button
                   type="button"
                   onClick={() => handleSwitchBoard("greenfield")}
-                  className={`mode-switch__button ${activeBoard === "greenfield" ? "is-active" : ""}`}
+                  className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${
+                    activeBoard === "greenfield"
+                      ? "bg-white text-gray-900 shadow-sm"
+                      : "text-gray-500 hover:text-gray-900"
+                  }`}
                 >
-                  <span className="mode-switch__title">新建简历</span>
-                  <span className="mode-switch__meta">录入岗位需求与候选人资料，生成初版简历。</span>
+                  新建简历
                 </button>
                 <button
                   type="button"
                   onClick={() => handleSwitchBoard("existing_resume")}
-                  className={`mode-switch__button ${activeBoard === "existing_resume" ? "is-active" : ""}`}
+                  className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${
+                    activeBoard === "existing_resume"
+                      ? "bg-white text-gray-900 shadow-sm"
+                      : "text-gray-500 hover:text-gray-900"
+                  }`}
                 >
-                  <span className="mode-switch__title">现有简历优化</span>
-                  <span className="mode-switch__meta">上传现有简历，围绕目标岗位要求定向优化。</span>
+                  优化简历
                 </button>
               </div>
-            </div>
-          </div>
 
-          <div className="dashboard-metrics">
-            <div className="dashboard-stat dashboard-stat--flow">
-              <div>
-                <p className="dashboard-stat__label">当前工作流</p>
-                <p className="dashboard-stat__value">{currentModeLabel}</p>
-              </div>
-              <p className="dashboard-stat__meta">{getBoardIntroStatus(activeBoard)}</p>
-            </div>
-
-            <div className="dashboard-stat dashboard-stat--account">
-              <div>
-                <p className="dashboard-stat__label">账户权益</p>
-                <div className="dashboard-account-grid">
-                  <div>
-                    <p className="dashboard-stat__label">用户名</p>
-                    <p className="dashboard-stat__value dashboard-stat__value--accent">
-                      {sessionUsername}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="dashboard-stat__label">本地记忆</p>
-                    <p className="dashboard-stat__value dashboard-stat__value--accent">
-                      {memory ? "已加载" : "等待加载"}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="dashboard-rights-grid">
-                  <div className="dashboard-rights-tile">
-                    <p className="dashboard-stat__label">余额</p>
-                    <p className="dashboard-rights-tile__value">{accountBalanceLabel}</p>
-                    <p className="dashboard-rights-tile__hint">用于按量付费</p>
-                  </div>
-                  <div className="dashboard-rights-tile">
-                    <p className="dashboard-stat__label">积分</p>
-                    <p className="dashboard-rights-tile__value">{accountPointsLabel}</p>
-                    <p className="dashboard-rights-tile__hint">可抵扣部分生成消耗</p>
-                  </div>
-                  <div className="dashboard-rights-tile">
-                    <p className="dashboard-stat__label">用户等级</p>
-                    <p className="dashboard-rights-tile__value">{accountMembershipLabel}</p>
-                    <p className="dashboard-rights-tile__hint">由系统分配</p>
-                  </div>
-                  <div className="dashboard-rights-tile">
-                    <p className="dashboard-stat__label">当前计费</p>
-                    <p className="dashboard-rights-tile__value">{currentBillingModeLabel}</p>
-                    <p className="dashboard-rights-tile__hint">后续支持买断付费</p>
-                  </div>
-                </div>
-
-                <div className="dashboard-plan-pills">
-                  {supportedBillingModeLabels.map((label) => (
-                    <span
-                      key={label}
-                      className={`chip ${
-                        label === currentBillingModeLabel ? "accent-chip" : ""
-                      }`}
-                    >
-                      {label}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <div className="dashboard-stat dashboard-stat--model">
-              <div>
-                <p className="dashboard-stat__label">模型状态</p>
-                <div className="mt-2 flex flex-wrap items-center gap-3">
-                  <p className="dashboard-stat__value mt-0">{currentModelLabel}</p>
-                  <span
-                    className={`dashboard-status-pill ${
-                      modelAvailability ? "is-available" : "is-unavailable"
-                    }`}
-                  >
-                    <span className="dashboard-status-pill__dot" />
-                    {modelAvailability ? "可用" : "不可用"}
-                  </span>
+              {activeInfoPage ? (
+                <button
+                  type="button"
+                  onClick={handleCloseInfoPage}
+                  className="rounded-full border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:border-gray-300 hover:text-gray-900"
+                >
+                  返回工作台
+                </button>
+              ) : (
+                <>
                   <button
                     type="button"
-                    onClick={() => refreshModelStatus()}
-                    disabled={modelStatusLoading}
-                    className="mini-outline-button"
+                    onClick={() => handleOpenInfoPage(activeBoard)}
+                    className="rounded-full border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:border-gray-300 hover:text-gray-900"
                   >
-                    {modelTestLabel}
+                    进入编辑页
                   </button>
-                </div>
-              </div>
-              <p className="dashboard-stat__meta">{modelCardMeta}</p>
+                  {hasPendingQuestionsForActiveBoard ? (
+                    <button
+                      type="button"
+                      onClick={() => setQuestionsOpen(true)}
+                      className="rounded-full border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:border-gray-300 hover:text-gray-900"
+                    >
+                      待补充追问
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => setHistoryDrawerOpen(true)}
+                    className="rounded-full border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:border-gray-300 hover:text-gray-900"
+                  >
+                    历史记录
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handlePrimaryWorkspaceAction}
+                    disabled={primaryWorkspaceActionDisabled}
+                    className="rounded-full bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {primaryActionCta}
+                  </button>
+                  <span
+                    className={`workspace-readiness-pill workspace-readiness-pill--${
+                      activeReadiness >= 80 ? "strong" : activeReadiness >= 50 ? "medium" : "soft"
+                    }`}
+                  >
+                    当前进度 {activeReadiness}%
+                  </span>
+                </>
+              )}
             </div>
           </div>
         </header>
 
-        <section className="paper-panel workspace-status-panel px-5 py-4">
-          <div className="workspace-status-panel__head">
-            <div>
-              <p className="text-sm font-semibold tracking-[0.28em] text-[var(--accent)] uppercase">
-                工作状态
-              </p>
-              <h2 className="mt-2 text-2xl font-semibold text-[var(--ink)]">当前工作区</h2>
-              <p
-                aria-live="polite"
-                className="mt-2 max-w-4xl text-sm leading-7 text-[var(--muted)]"
-              >
-                {statusText}
-              </p>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              <span className="chip">{draftSaveStatus || "资料支持自动保存"}</span>
-              <span className="chip">{loading ? "当前有任务执行中" : "当前空闲，可继续操作"}</span>
-            </div>
-          </div>
-
-          <div className="workspace-status-strip">
-            <div className="workspace-status-chip">
-              <span className="workspace-status-chip__label">当前模式</span>
-              <strong className="workspace-status-chip__value">{currentModeLabel}</strong>
-            </div>
-            <div className="workspace-status-chip">
-              <span className="workspace-status-chip__label">准备度</span>
-              <strong className="workspace-status-chip__value">{activeReadiness}%</strong>
-            </div>
-            <div className="workspace-status-chip">
-              <span className="workspace-status-chip__label">正文进度</span>
-              <strong className="workspace-status-chip__value">
-                {activeResumeLength > 0 ? `${activeResumeLength} 字符` : "尚未落版"}
-              </strong>
-            </div>
-          </div>
-        </section>
-
-        <section className="paper-panel-strong workspace-monitor px-5 py-5">
-          <div className="workspace-monitor__header">
-            <div>
-              <p className="text-sm font-semibold tracking-[0.28em] text-[var(--accent)] uppercase">
-                工作台监控
-              </p>
-              <h2 className="mt-2 text-2xl font-semibold text-[var(--ink)]">
-                {workspaceCommandTitle}
-              </h2>
-              <p className="mt-3 max-w-4xl text-sm leading-7 text-[var(--muted)]">
-                {workspaceCommandDescription}
-              </p>
-            </div>
-
-            <div className="workspace-monitor__chips">
-              <span className={`chip ${isActiveBoardStreaming ? "accent-chip" : ""}`}>
-                {workspaceMonitorLabel}
-              </span>
-              <span className="chip">
-                {activeStreamCharCount > 0
-                  ? `已接收 ${activeStreamCharCount} 个字符`
-                  : `当前准备度 ${activeReadiness}%`}
-              </span>
-              {activeContractReport?.validated ? <span className="chip">契约已锁定</span> : null}
-              {hasPendingQuestionsForActiveBoard ? (
-                <span className="chip">有待处理追问</span>
-              ) : null}
-            </div>
-          </div>
-
-          <div className="workspace-monitor-grid">
-            <article
-              className={`workspace-monitor-card workspace-monitor-card--status ${
-                isActiveBoardStreaming ? "is-live" : ""
-              } ${liveStreamState.error ? "is-danger" : ""}`}
-            >
-              <div className="workspace-monitor-card__head">
-                <p className="workspace-monitor-card__eyebrow">通道状态</p>
-                <span className={`workspace-monitor-pill ${isActiveBoardStreaming ? "is-live" : ""}`}>
-                  {workspaceMonitorLabel}
-                </span>
-              </div>
-              <h3 className="workspace-monitor-card__title">
-                {activeBoard === "existing_resume" ? "优化流" : "生成流"}
-              </h3>
-              <p className="workspace-monitor-card__copy">{workspaceMonitorSummary}</p>
-
-              <div className="workspace-monitor-stack">
-                <div className="workspace-monitor-stack__item">
-                  <span className="workspace-monitor-stack__label">实时状态</span>
-                  <p>{workspaceMonitorDetail}</p>
-                </div>
-                <div className="workspace-monitor-stack__item">
-                  <span className="workspace-monitor-stack__label">当前焦点</span>
-                  <p>
-                    {activeBoard === "existing_resume"
-                      ? "以岗位要求为锚点优化现有简历，并同步刷新右侧正文。"
-                      : "以目标岗位与候选人素材为基础生成全新简历草稿。"}
-                  </p>
-                </div>
-              </div>
-
-              {liveStreamState.error ? (
-                <p className="workspace-monitor-card__error">{liveStreamState.error}</p>
-              ) : null}
-            </article>
-
-            <article className="workspace-monitor-card workspace-monitor-card--contract">
-              <div className="workspace-monitor-card__head">
-                <p className="workspace-monitor-card__eyebrow">契约快照</p>
-                <span className="workspace-monitor-pill">
-                  {activeContractReport?.validated ? "已校验" : "待校验"}
-                </span>
-              </div>
-
-              <div className="workspace-monitor-stat-grid">
-                {workspaceMonitorStats.map((stat) => (
-                  <div key={stat.label} className="workspace-monitor-stat">
-                    <span className="workspace-monitor-stat__label">{stat.label}</span>
-                    <strong className="workspace-monitor-stat__value">{stat.value}</strong>
-                    <p className="workspace-monitor-stat__meta">{stat.meta}</p>
-                  </div>
-                ))}
-              </div>
-            </article>
-
-            <article className="workspace-monitor-card workspace-monitor-card--stream">
-              <div className="workspace-monitor-card__head">
-                <p className="workspace-monitor-card__eyebrow">实时 JSON 通道</p>
-                <span className="workspace-monitor-pill">
-                  {activeStreamCharCount > 0 ? `${activeStreamCharCount} 个字符` : "等待输出"}
-                </span>
-              </div>
-
-              <pre className="workspace-monitor-card__pre">
-                {liveStreamSnippet || workspaceMonitorJsonFallback}
-              </pre>
-            </article>
-          </div>
-        </section>
-
         {activeInfoPage ? (
-          <section className="subpage-shell">
-            {activeInfoPage === "greenfield" ? (
-              <UserFormPanel
-                jobInfo={greenfieldFormState.basic_info}
-                formState={greenfieldFormState}
-                statusText={statusText}
-                loading={loading}
-                jobInfoReady={greenfieldJobInfoReady}
-                draftSaving={draftSaving}
-                draftSaveStatus={draftSaveStatus}
-                onSaveDraft={handleSaveWorkspace}
-                onClearInfo={handleClearGreenfieldInfo}
-                onRestoreBackup={handleRestoreWorkspaceBackup}
-                hasSavedBackup={Boolean(memory?.workspace_draft?.form_state)}
-                onJobFieldChange={updateGreenfieldBasicInfo}
-                onApplyGenericJobInfo={() => applyGenericJobInfo("greenfield")}
-                onBasicInfoChange={updateGreenfieldBasicInfo}
-                onToggleFullInformation={(checked) =>
-                  setGreenfieldFormState((previous) => ({
-                    ...previous,
-                    use_full_information: checked,
-                  }))
-                }
-                onSkillsTextChange={(value) =>
-                  setGreenfieldFormState((previous) => ({
-                    ...previous,
-                    skills_text: value,
-                  }))
-                }
-                onToggleModule={toggleModule}
-                onUploadFiles={handleScopedUpload}
-                onListItemChange={updateGreenfieldListItem}
-                onAddListItem={addListItem}
-                onRemoveListItem={removeListItem}
-                onBack={handleCloseInfoPage}
-                hasPendingQuestions={hasPendingQuestionsForActiveBoard}
-                onOpenQuestions={() => setQuestionsOpen(true)}
-              />
-            ) : (
-              <ExistingResumePanel
-                jobInfo={existingFormState}
-                onJobFieldChange={updateExistingField}
-                onApplyGenericJobInfo={() => applyGenericJobInfo("existing_resume")}
-                statusText={statusText}
-                loading={loading}
-                jobInfoReady={existingJobInfoReady}
-                resumeSourceText={existingFormState.resume_source_text}
-                resumeSourceName={existingFormState.resume_source_name}
-                additionalAnswerCount={existingAnswerCount}
-                onResumeSourceChange={(value) => updateExistingField("resume_source_text", value)}
-                onUploadResumeFile={handleExistingResumeUpload}
-                onClearInfo={handleClearExistingInfo}
-                onBack={handleCloseInfoPage}
-                hasPendingQuestions={hasPendingQuestionsForActiveBoard}
-                onOpenQuestions={() => setQuestionsOpen(true)}
-              />
-            )}
-          </section>
-        ) : (
-          <>
-            <main className="workspace-shell">
-              <div className="min-h-0">
-                {activeBoard === "existing_resume" ? (
-                  <ExistingResumePreview
-                    title={existingResumeWorkspace.title}
-                    resumeText={existingResumeWorkspace.resume_text}
-                    onResumeChange={(value) =>
-                      updateWorkspace("existing_resume", (previous) => ({
-                        ...previous,
-                        resume_text: value,
-                      }))
-                    }
-                    onSaveManualEdit={handleSaveManualEdit}
-                    onClearResume={handleClearResume}
-                    onExport={handleExport}
-                    generationMode={existingResumeWorkspace.generation_mode}
-                    analysisNotes={existingResumeWorkspace.analysis_notes}
-                    structuredResume={existingResumeWorkspace.structured_resume}
-                    contractReport={existingResumeWorkspace.contract_report}
-                    streamingDraftText={
-                      liveStreamState.board === "existing_resume" ? liveStreamState.raw_json : ""
-                    }
-                    streamingStatus={
-                      liveStreamState.board === "existing_resume" ? liveStreamState.status : ""
-                    }
-                    isStreaming={
-                      liveStreamState.board === "existing_resume" && liveStreamState.active
-                    }
-                    loading={loading}
-                    revisionInstruction={existingResumeWorkspace.revision_instruction}
-                    onRevisionInstructionChange={(value) =>
-                      updateWorkspace("existing_resume", (previous) => ({
-                        ...previous,
-                        revision_instruction: value,
-                      }))
-                    }
-                    onReviseWithAI={handleReviseWithAI}
-                  />
-                ) : (
-                  <GreenfieldResumePreview
-                    title={greenfieldWorkspace.title}
-                    resumeText={greenfieldWorkspace.resume_text}
-                    onResumeChange={(value) =>
-                      updateWorkspace("greenfield", (previous) => ({
-                        ...previous,
-                        resume_text: value,
-                      }))
-                    }
-                    onSaveManualEdit={handleSaveManualEdit}
-                    onClearResume={handleClearResume}
-                    onExport={handleExport}
-                    generationMode={greenfieldWorkspace.generation_mode}
-                    analysisNotes={greenfieldWorkspace.analysis_notes}
-                    structuredResume={greenfieldWorkspace.structured_resume}
-                    contractReport={greenfieldWorkspace.contract_report}
-                    streamingDraftText={
-                      liveStreamState.board === "greenfield" ? liveStreamState.raw_json : ""
-                    }
-                    streamingStatus={
-                      liveStreamState.board === "greenfield" ? liveStreamState.status : ""
-                    }
-                    isStreaming={liveStreamState.board === "greenfield" && liveStreamState.active}
-                    loading={loading}
-                    revisionInstruction={greenfieldWorkspace.revision_instruction}
-                    onRevisionInstructionChange={(value) =>
-                      updateWorkspace("greenfield", (previous) => ({
-                        ...previous,
-                        revision_instruction: value,
-                      }))
-                    }
-                    onReviseWithAI={handleReviseWithAI}
-                  />
-                )}
-              </div>
+          <div className="flex-1 overflow-y-auto">
+            <div className="mx-auto flex max-w-[1500px] gap-8 px-6 py-6">
+              <EditAnchorNav items={editAnchorItems} />
 
-              <aside className="workspace-rail">
-                <section className="paper-panel workspace-entry-card workspace-entry-card--glass p-6 lg:p-7">
-                  <div className="workspace-entry-card__header">
-                    <div>
-                      <p className="text-sm font-semibold tracking-[0.28em] text-[var(--accent)] uppercase">
-                        资料录入
-                      </p>
-                      <h2 className="mt-2 text-3xl font-semibold text-[var(--ink)]">
-                        {workspaceEntryTitle}
-                      </h2>
-                      <p className="mt-3 text-sm leading-7 text-[var(--muted)]">
-                        {workspaceEntryDescription}
-                      </p>
-                    </div>
-                    <span className="chip accent-chip">{currentModeLabel}</span>
-                  </div>
-
-                  <div className="workspace-entry-card__glass-note">
-                    <span className="workspace-entry-card__glass-badge">玻璃拟态面板</span>
-                    <span className="workspace-entry-card__glass-copy">
-                      这里就是左侧控制面板，已叠加 `backdrop-blur-md + bg-white/30 + border-white/20`
-                    </span>
-                  </div>
-
-                  <div className="entry-metric-grid">
-                    {activeBoard === "existing_resume" ? (
-                      <>
-                        <div className="entry-metric">
-                          <span className="entry-metric__label">岗位信息</span>
-                          <strong className="entry-metric__value">
-                            {existingJobInfoReady ? "已完成" : "待填写"}
-                          </strong>
-                        </div>
-                        <div className="entry-metric">
-                          <span className="entry-metric__label">原始简历</span>
-                          <strong className="entry-metric__value">
-                            {existingResumeReady ? "已准备" : "未准备"}
-                          </strong>
-                        </div>
-                        <div className="entry-metric">
-                          <span className="entry-metric__label">补充回答</span>
-                          <strong className="entry-metric__value">{existingAnswerCount}</strong>
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <div className="entry-metric">
-                          <span className="entry-metric__label">岗位信息</span>
-                          <strong className="entry-metric__value">
-                            {greenfieldJobInfoReady ? "已完成" : "待填写"}
-                          </strong>
-                        </div>
-                        <div className="entry-metric">
-                          <span className="entry-metric__label">候选人素材</span>
-                          <strong className="entry-metric__value">
-                            {greenfieldProfileFieldCount + greenfieldStructuredCount}
-                          </strong>
-                        </div>
-                        <div className="entry-metric">
-                          <span className="entry-metric__label">关联附件</span>
-                          <strong className="entry-metric__value">{greenfieldAttachmentCount}</strong>
-                        </div>
-                      </>
-                    )}
-                  </div>
-
-                  <div className="workspace-entry-card__progress">
-                    <div className="workspace-entry-card__progress-head">
-                      <div>
-                        <p className="entry-metric__label">当前准备度</p>
-                        <p className="workspace-entry-card__progress-copy">
-                          {activeReadinessDescription}
+              <div className="min-w-0 flex-1">
+                <div className="mx-auto max-w-4xl space-y-6">
+                  <section className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                      <div className="max-w-3xl">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-indigo-600">
+                          专注模式
                         </p>
+                        <h2 className="mt-2 text-2xl font-semibold tracking-tight text-gray-900">
+                          {infoPageHeading}
+                        </h2>
+                        <p className="mt-3 text-sm leading-6 text-gray-500">{infoPageDescription}</p>
                       </div>
-                      <strong className="workspace-entry-card__progress-score">
-                        {activeReadiness}% · {activeReadinessTone}
-                      </strong>
-                    </div>
 
-                    <div className="workspace-entry-card__progress-track" aria-hidden="true">
-                      <span
-                        className="workspace-entry-card__progress-fill"
-                        style={{ width: `${activeReadiness}%` }}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="entry-checkpoint-grid">
-                    {entryCheckpoints.map((checkpoint) => (
-                      <div
-                        key={checkpoint.label}
-                        className={`entry-checkpoint ${checkpoint.done ? "is-complete" : ""}`}
-                      >
-                        <span className="entry-checkpoint__label">{checkpoint.label}</span>
-                        <strong className="entry-checkpoint__value">{checkpoint.value}</strong>
-                        <p className="entry-checkpoint__meta">{checkpoint.meta}</p>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="workspace-entry-card__action-note">
-                    <p className="workspace-entry-card__action-label">下一步</p>
-                    <p className="workspace-entry-card__action-copy">
-                      {activeBoard === "existing_resume"
-                        ? "先进入资料录入补齐岗位信息和原始简历，再从这里直接启动流式优化。"
-                        : "先进入资料录入完善岗位与候选人素材，再从这里直接启动简历生成。"}
-                    </p>
-                  </div>
-
-                  <div className="workspace-entry-card__action-row">
-                    <button
-                      type="button"
-                      onClick={() => handleOpenInfoPage(activeBoard)}
-                      className="pill-button pill-button--ghost workspace-entry-card__action-secondary"
-                    >
-                      {workspaceEntryButtonLabel}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handlePrimaryWorkspaceAction}
-                      disabled={primaryWorkspaceActionDisabled}
-                      className="pill-button pill-button--primary workspace-entry-card__action-primary"
-                    >
-                      {primaryWorkspaceActionLabel}
-                    </button>
-                  </div>
-
-                  <div className="workspace-entry-card__action-stack">
-                    {liveStreamState.active && liveStreamState.board === activeBoard ? (
                       <button
                         type="button"
-                        onClick={() => liveStreamAbortRef.current?.abort?.()}
-                        className="pill-button pill-button--ghost"
+                        onClick={handleCloseInfoPage}
+                        className="rounded-full border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:border-gray-300 hover:text-gray-900"
                       >
-                        停止生成
+                        返回预览
                       </button>
-                    ) : null}
-                    {hasPendingQuestionsForActiveBoard ? (
-                      <button
-                        type="button"
-                        onClick={() => setQuestionsOpen(true)}
-                        className="pill-button pill-button--ghost"
-                      >
-                        继续回答追问
-                      </button>
-                    ) : null}
-                  </div>
-                </section>
-              </aside>
-            </main>
+                    </div>
+                  </section>
 
-            <HistoryCard
-              memory={memory}
-              onRestoreSnapshot={handleRestoreSnapshot}
-              onDeleteSnapshot={handleDeleteSnapshot}
-              onPreviewUpload={handlePreviewUpload}
-              onDeleteUpload={handleDeleteUpload}
-              onPreviewExport={handlePreviewExport}
-              onRedownloadExport={handleRedownloadExport}
-              onDeleteExport={handleDeleteExport}
-            />
-          </>
+                  {activeInfoPage === "greenfield" ? (
+                    <UserFormPanel
+                      jobInfo={greenfieldFormState.basic_info}
+                      formState={greenfieldFormState}
+                      statusText={statusText}
+                      loading={loading}
+                      jobInfoReady={greenfieldJobInfoReady}
+                      draftSaving={draftSaving}
+                      draftSaveStatus={draftSaveStatus}
+                      onSaveDraft={handleSaveWorkspace}
+                      onClearInfo={handleClearGreenfieldInfo}
+                      onRestoreBackup={handleRestoreWorkspaceBackup}
+                      hasSavedBackup={Boolean(memory?.workspace_draft?.form_state)}
+                      onJobFieldChange={updateGreenfieldBasicInfo}
+                      onApplyGenericJobInfo={() => applyGenericJobInfo("greenfield")}
+                      onBasicInfoChange={updateGreenfieldBasicInfo}
+                      onToggleFullInformation={(checked) =>
+                        setGreenfieldFormState((previous) => ({
+                          ...previous,
+                          use_full_information: checked,
+                        }))
+                      }
+                      onSkillsTextChange={(value) =>
+                        setGreenfieldFormState((previous) => ({
+                          ...previous,
+                          skills_text: value,
+                        }))
+                      }
+                      onToggleModule={toggleModule}
+                      onUploadFiles={handleScopedUpload}
+                      onListItemChange={updateGreenfieldListItem}
+                      onAddListItem={addListItem}
+                      onRemoveListItem={removeListItem}
+                      onBack={handleCloseInfoPage}
+                      hasPendingQuestions={hasPendingQuestionsForActiveBoard}
+                      onOpenQuestions={() => setQuestionsOpen(true)}
+                      sectionIds={{
+                        jobTarget: "greenfield-job-target",
+                        management: "greenfield-management",
+                        profile: "greenfield-profile",
+                        skills: "greenfield-skills",
+                        education: "greenfield-education",
+                        projects: "greenfield-projects",
+                        experiences: "greenfield-experiences",
+                      }}
+                    />
+                  ) : (
+                    <ExistingResumePanel
+                      jobInfo={existingFormState}
+                      onJobFieldChange={updateExistingField}
+                      onApplyGenericJobInfo={() => applyGenericJobInfo("existing_resume")}
+                      statusText={statusText}
+                      loading={loading}
+                      jobInfoReady={existingJobInfoReady}
+                      resumeSourceText={existingFormState.resume_source_text}
+                      resumeSourceName={existingFormState.resume_source_name}
+                      additionalAnswerCount={existingAnswerCount}
+                      onResumeSourceChange={(value) => updateExistingField("resume_source_text", value)}
+                      onUploadResumeFile={handleExistingResumeUpload}
+                      onClearInfo={handleClearExistingInfo}
+                      onBack={handleCloseInfoPage}
+                      hasPendingQuestions={hasPendingQuestionsForActiveBoard}
+                      onOpenQuestions={() => setQuestionsOpen(true)}
+                      sectionIds={{
+                        jobTarget: "existing-job-target",
+                        status: "existing-status",
+                        source: "existing-source",
+                      }}
+                    />
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="flex-1 overflow-y-auto p-6">
+            <div className="mx-auto max-w-[1600px] space-y-6">
+              <section className="grid gap-6 xl:grid-cols-12">
+                <div className="space-y-6 xl:col-span-8">
+                  <AtsDashboard
+                    result={activeAtsResult}
+                    meta={activeAtsMeta}
+                    isStreaming={isActiveBoardStreaming || semanticAtsState.status === "loading"}
+                    emptyStateCopy={atsEmptyStateCopy}
+                  />
+
+                  <ResumeWorkbenchPreview
+                    boardLabel={currentModeLabel}
+                    title={dashboardResultTitle}
+                    structuredResume={activeStructuredResume}
+                    resumeText={activeWorkspace.resume_text}
+                    generationMode={activeWorkspace.generation_mode}
+                    isStreaming={isActiveBoardStreaming}
+                    streamStatus={activeStreamStatusText}
+                    summaryItems={activeSummaryItems}
+                  />
+                </div>
+
+                <div className="space-y-6 xl:col-span-4 xl:flex xl:min-h-full xl:flex-col">
+                  <AiProgressTimeline
+                    status={activeStreamStatusText || statusText}
+                    phase={liveStreamState.phase}
+                    step={liveStreamState.step}
+                    totalSteps={liveStreamState.totalSteps || 6}
+                    meta={liveStreamState.meta}
+                    isStreaming={isActiveBoardStreaming}
+                    activities={activeStreamActivities}
+                    jobInsight={jobInsightState.data}
+                    onRefreshJobContext={() => refreshJobInsight({ forceRefresh: true })}
+                    onOpenSources={() => setJobInsightDrawerOpen(true)}
+                    onJumpToField={handleJumpToField}
+                    refreshingJobContext={jobInsightState.status === "loading"}
+                    streamError={liveStreamState.error}
+                    contractWarning={activeContractWarning}
+                  />
+
+                  <DraftLabPanel
+                    boardLabel={currentModeLabel}
+                    title={dashboardResultTitle}
+                    resumeText={activeWorkspace.resume_text}
+                    onResumeChange={(value) =>
+                      updateWorkspace(activeBoard, (previous) => ({
+                        ...previous,
+                        resume_text: value,
+                      }))
+                    }
+                    generationMode={activeWorkspace.generation_mode}
+                    isStreaming={isActiveBoardStreaming}
+                    streamStatus={activeStreamStatusText || statusText}
+                    loading={loading}
+                    onSaveManualEdit={handleSaveManualEdit}
+                    onClearResume={handleClearResume}
+                    onExport={handleExport}
+                    revisionInstruction={activeWorkspace.revision_instruction}
+                    onRevisionInstructionChange={(value) =>
+                      updateWorkspace(activeBoard, (previous) => ({
+                        ...previous,
+                        revision_instruction: value,
+                      }))
+                    }
+                    onReviseWithAI={handleReviseWithAI}
+                    onOpenJsonModal={() => setJsonModalOpen(true)}
+                    onAbortStream={() => liveStreamAbortRef.current?.abort?.()}
+                    analysisCount={activeAnalysisCount}
+                    warning={liveStreamState.error || activeContractWarning}
+                    onSaveWorkspace={activeBoard === "greenfield" ? handleSaveWorkspace : undefined}
+                    onRestoreWorkspaceBackup={
+                      activeBoard === "greenfield" ? handleRestoreWorkspaceBackup : undefined
+                    }
+                    draftSaving={draftSaving}
+                    hasSavedBackup={Boolean(memory?.workspace_draft?.form_state)}
+                  />
+                </div>
+              </section>
+
+            </div>
+          </div>
         )}
       </div>
 
@@ -2601,6 +3168,37 @@ export default function App() {
             : undefined
         }
       />
+
+      <JobInsightDrawer
+        open={jobInsightDrawerOpen}
+        onClose={() => setJobInsightDrawerOpen(false)}
+        jobInsight={jobInsightState.data}
+        targetCompany={activeJobInfo?.target_company || ""}
+        targetRole={activeJobInfo?.target_role || ""}
+      />
+
+      <LiveJsonModal
+        open={jsonModalOpen}
+        title={`${currentModeLabel} 实时 JSON`}
+        subtitle="仅在需要时查看。"
+        content={liveJsonContent}
+        onClose={() => setJsonModalOpen(false)}
+      />
+
+      <WorkspaceHistoryDrawer
+        open={historyDrawerOpen}
+        onClose={() => setHistoryDrawerOpen(false)}
+        analysisNotes={activeWorkspace.analysis_notes}
+        memory={memory}
+        onRestoreSnapshot={handleRestoreSnapshot}
+        onDeleteSnapshot={handleDeleteSnapshot}
+        onPreviewUpload={handlePreviewUpload}
+        onDeleteUpload={handleDeleteUpload}
+        onPreviewExport={handlePreviewExport}
+        onRedownloadExport={handleRedownloadExport}
+        onDeleteExport={handleDeleteExport}
+      />
     </div>
   );
+
 }

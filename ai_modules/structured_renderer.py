@@ -162,7 +162,7 @@ def render_resume_markdown(structured_resume: StructuredResume) -> str:
     lines: List[str] = []
     lines.extend(_render_contact(structured_resume.contact))
     if structured_resume.summary.strip():
-        lines.extend(["## 个人总结", f"- {structured_resume.summary.strip()}", ""])
+        lines.extend(["## 个人总结", "", structured_resume.summary.strip(), ""])
     lines.extend(_render_skill_categories(structured_resume.skills))
     lines.extend(_render_experience(structured_resume.experience))
     lines.extend(_render_projects(structured_resume.projects))
@@ -170,14 +170,24 @@ def render_resume_markdown(structured_resume: StructuredResume) -> str:
     return "\n".join(_clean_lines(lines))
 
 
-def build_contract_report(structured_resume: StructuredResume, renderer: str, question_count: int) -> Dict:
+def build_contract_report(
+    structured_resume: StructuredResume,
+    renderer: str,
+    question_count: int,
+    source: str = "model",
+    llm_contract_ok: bool = True,
+    warning: str = "",
+) -> Dict:
     """Create a compact schema status object for the frontend workspace."""
 
     return {
         "schema_name": "resume_contract",
-        "schema_version": "v1",
+        "schema_version": "v2",
         "validated": True,
         "renderer": renderer,
+        "source": source,
+        "llm_contract_ok": bool(llm_contract_ok),
+        "warning": (warning or "").strip(),
         "question_count": max(0, int(question_count or 0)),
         "section_counts": {
             "experience": len(structured_resume.experience),

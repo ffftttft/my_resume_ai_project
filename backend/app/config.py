@@ -27,6 +27,20 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_base_url: str = ""
     openai_model: str = "gpt-5.4-mini"
+    openai_embeddings_enabled: bool = True
+    openai_embedding_api_key: str = ""
+    openai_embedding_base_url: str = ""
+    openai_embedding_model: str = "text-embedding-3-small"
+    embedding_provider_cooldown_seconds: int = 180
+    tavily_api_key: str = ""
+    job_search_enabled: bool = True
+    job_search_ttl_seconds: int = 1800
+    job_search_max_results: int = 3
+    rag_enabled: bool = True
+    rag_backend: str = "local"
+    rag_top_k: int = 3
+    rag_reference_dir: Path = project_root / "backend" / "data" / "rag_reference_resumes"
+    rag_chroma_persist_dir: Path = project_root / "backend" / "data" / "chromadb"
     default_modules: List[str] = Field(
         default_factory=lambda: [
             "summary",

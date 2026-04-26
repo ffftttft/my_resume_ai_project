@@ -109,7 +109,13 @@ function DetailList({ items }) {
 
 function EntryCard({ title, meta = [], summary, bullets = [] }) {
   return (
-    <article className="rounded-[26px] border border-slate-200/80 bg-white/80 p-5 shadow-[0_18px_36px_rgba(15,23,42,0.06)]">
+    <motion.article
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3 }}
+      whileHover={{ y: -2, transition: { duration: 0.2 } }}
+      className="rounded-[26px] border border-slate-200/90 bg-white/85 p-5 shadow-[0_4px_16px_rgba(15,23,42,0.06),0_1px_4px_rgba(15,23,42,0.04)] backdrop-blur-sm transition-shadow hover:shadow-[0_8px_24px_rgba(15,23,42,0.08),0_2px_8px_rgba(15,23,42,0.06)]"
+    >
       <div className="space-y-3">
         <div>
           <h4 className="text-base font-semibold text-slate-900">{title}</h4>
@@ -126,7 +132,7 @@ function EntryCard({ title, meta = [], summary, bullets = [] }) {
 
         <DetailList items={bullets} />
       </div>
-    </article>
+    </motion.article>
   );
 }
 
@@ -173,7 +179,7 @@ export default function ResumePreview({
       : "本地预览";
 
   return (
-    <section className="relative overflow-hidden rounded-[32px] border border-white/70 bg-white/78 p-5 shadow-[0_28px_80px_rgba(15,23,42,0.08)] backdrop-blur-xl lg:p-7">
+    <section className="relative overflow-hidden rounded-[32px] border border-white/80 bg-white/85 p-5 shadow-[0_8px_32px_rgba(0,0,0,0.08),0_2px_8px_rgba(0,0,0,0.04)] backdrop-blur-2xl lg:p-7">
       <motion.div
         className="pointer-events-none absolute -left-10 top-10 h-40 w-40 rounded-full bg-[radial-gradient(circle,rgba(82,145,255,0.18),transparent_70%)] blur-3xl"
         animate={{ x: [0, 24, 0], y: [0, -10, 0], opacity: [0.55, 0.9, 0.55] }}

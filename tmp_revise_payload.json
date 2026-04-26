@@ -1,0 +1,24 @@
+﻿{
+  "profile": {
+    "basic_info": {
+      "name": "测试同学",
+      "target_company": "OpenAI",
+      "target_role": "后端开发实习生",
+      "job_requirements": "熟悉 Python、FastAPI、接口设计、数据处理",
+      "email": "demo@example.com",
+      "phone": "13800000000",
+      "city": "上海"
+    },
+    "skills": ["Python", "FastAPI", "SQL", "Git"],
+    "education": [],
+    "projects": [],
+    "experiences": [],
+    "modules": ["summary", "skills", "education", "projects", "experience"],
+    "membership_level": "basic",
+    "use_full_information": false,
+    "uploaded_context": "",
+    "additional_answers": []
+  },
+  "resume_text": "# 原始简历\n\n- 内容A",
+  "instruction": "请增强项目成果并突出后端接口设计经验"
+}

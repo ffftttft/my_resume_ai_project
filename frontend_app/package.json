@@ -15,6 +15,7 @@
     "partial-json-parser": "^1.2.2",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
+    "string-similarity": "^4.0.4",
     "zod": "^4.3.6",
     "zod-to-json-schema": "^3.25.2"
   },

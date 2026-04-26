@@ -162,18 +162,51 @@ class ResumeAIEngine:
         return self._extract_json(raw_text)
 
     def _call_structured(self, response_model, messages: List[Dict[str, str]], max_retries: int = 2):
-        """Call Instructor with a strict Pydantic response model."""
+        """Call the Responses API and parse strict structured JSON into a Pydantic model."""
 
-        if not self.structured_client:
+        if not self.client:
             raise RuntimeError("Structured OpenAI client is not configured.")
 
-        return self.structured_client.chat.completions.create(
-            model=self.model_name,
-            response_model=response_model,
-            messages=messages,
-            max_retries=max_retries,
-            temperature=0.2,
-        )
+        attempts = max(1, int(max_retries or 0) + 1)
+        last_error: Exception | None = None
+
+        for _ in range(attempts):
+            raw_text_parts: List[str] = []
+            try:
+                with self.client.responses.stream(
+                    model=self.model_name,
+                    input=messages,
+                    text_format=response_model,
+                    temperature=0.2,
+                ) as stream:
+                    for event in stream:
+                        event_type = getattr(event, "type", "")
+                        if event_type == "response.output_text.delta":
+                            delta = getattr(event, "delta", "") or ""
+                            if delta:
+                                raw_text_parts.append(delta)
+                        elif event_type == "response.output_text.done" and not raw_text_parts:
+                            text = getattr(event, "text", "") or ""
+                            if text:
+                                raw_text_parts.append(text)
+
+                    final_response = stream.get_final_response()
+
+                parsed = getattr(final_response, "output_parsed", None)
+                if parsed is not None:
+                    return parsed
+
+                raw_text = "".join(raw_text_parts) or getattr(final_response, "output_text", "") or ""
+                try:
+                    return response_model.model_validate_json(raw_text)
+                except Exception:
+                    return response_model.model_validate(self._extract_json(raw_text))
+            except Exception as exc:
+                last_error = exc
+
+        if last_error:
+            raise last_error
+        raise RuntimeError("Structured model call failed without a captured exception.")
 
     def probe_model(self) -> Dict:
         """Run a lightweight live probe against the configured model."""
@@ -518,6 +551,9 @@ class ResumeAIEngine:
         mode: str = "openai",
         used_ai: bool = True,
         title: str = "",
+        contract_source: str = "model",
+        llm_contract_ok: bool = True,
+        warning: str = "",
     ) -> Dict:
         """Convert a validated contract into the response shape expected by the UI."""
 
@@ -536,6 +572,9 @@ class ResumeAIEngine:
                 structured_resume,
                 renderer="instructor" if used_ai else "local_renderer",
                 question_count=len(normalized_questions),
+                source=contract_source,
+                llm_contract_ok=llm_contract_ok,
+                warning=warning,
             ),
         }
 
@@ -854,6 +893,7 @@ class ResumeAIEngine:
                     instruction=instruction,
                     additional_answers=payload.get("additional_answers") or [],
                     persistent_profile_memory=self.session_context.get("persistent_profile_memory") or {},
+                    web_context=payload.get("web_context") or [],
                 ),
             )
             model_text = self._plain_text(result.get("resume_text") or fallback_text)

@@ -1,4 +1,4 @@
-"""Persistent user-profile memory capped to a small JSON file."""
+"""Compact persistent user-profile memory stored in profile_memory.json."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from typing import Any, Dict, Iterable
 
 
 class ProfileMemoryService:
-    """Keep a compact long-term user profile memory under a hard byte limit."""
+    """Keep a readable long-term user profile memory under a hard byte limit."""
 
     def __init__(self, profile_memory_file: Path, max_bytes: int = 4096):
         self.profile_memory_file = profile_memory_file
@@ -26,7 +26,7 @@ class ProfileMemoryService:
 
     def _default_payload(self) -> Dict[str, Any]:
         return {
-            "note": "Persistent user profile memory loaded on every fresh website session.",
+            "note": "Compact persistent profile memory loaded for each fresh website session.",
             "username": "ft",
             "updated_at": self._now(),
             "max_size_bytes": self.max_bytes,
@@ -38,7 +38,7 @@ class ProfileMemoryService:
                 "education_keywords": [],
                 "project_keywords": [],
                 "experience_keywords": [],
-                "writing_preferences": ["中文简历", "优先量化结果"],
+                "writing_preferences": ["中文简历", "表达精炼", "优先量化结果"],
                 "fact_guards": ["不得编造事实", "不得夸大经历", "优先使用用户提供信息"],
             },
         }
@@ -53,8 +53,18 @@ class ProfileMemoryService:
     def _json_size(self, payload: Dict[str, Any]) -> int:
         return len(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
 
-    def _compact_text(self, value: str, limit: int) -> str:
-        compact = re.sub(r"\s+", " ", value or "").strip()
+    def _compact_text(self, value: Any, limit: int) -> str:
+        compact = re.sub(r"\s+", " ", str(value or "")).strip()
+        if not compact:
+            return ""
+
+        question_mark_count = compact.count("?") + compact.count("？")
+        if question_mark_count >= max(2, len(compact) // 3):
+            return ""
+
+        if compact.lower() in {"unknown", "n/a", "na", "none", "null"}:
+            return ""
+
         return compact[:limit]
 
     def _merge_unique(
@@ -74,33 +84,46 @@ class ProfileMemoryService:
                 break
         return merged
 
-    def _normalize_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def _normalize_payload(self, payload: Dict[str, Any] | None) -> Dict[str, Any]:
         base = self._default_payload()
-        profile = payload.get("profile") or {}
-        base["username"] = self._compact_text(payload.get("username") or "ft", 32) or "ft"
-        base["updated_at"] = payload.get("updated_at") or self._now()
-        base["profile"] = {
-            "target_roles": self._merge_unique(profile.get("target_roles", []), [], max_items=6, item_limit=28),
-            "target_companies": self._merge_unique(
-                profile.get("target_companies", []), [], max_items=6, item_limit=28
-            ),
-            "cities": self._merge_unique(profile.get("cities", []), [], max_items=4, item_limit=16),
-            "skills": self._merge_unique(profile.get("skills", []), [], max_items=12, item_limit=24),
-            "education_keywords": self._merge_unique(
-                profile.get("education_keywords", []), [], max_items=6, item_limit=36
-            ),
-            "project_keywords": self._merge_unique(
-                profile.get("project_keywords", []), [], max_items=8, item_limit=40
-            ),
-            "experience_keywords": self._merge_unique(
-                profile.get("experience_keywords", []), [], max_items=8, item_limit=40
-            ),
-            "writing_preferences": self._merge_unique(
-                profile.get("writing_preferences", []), [], max_items=6, item_limit=18
-            ),
-            "fact_guards": self._merge_unique(profile.get("fact_guards", []), [], max_items=4, item_limit=18),
+        source = payload if isinstance(payload, dict) else {}
+        profile = source.get("profile") or {}
+
+        return {
+            "note": self._compact_text(source.get("note") or base["note"], 200) or base["note"],
+            "username": self._compact_text(source.get("username") or "ft", 32) or "ft",
+            "updated_at": self._compact_text(source.get("updated_at"), 64) or self._now(),
+            "max_size_bytes": self.max_bytes,
+            "profile": {
+                "target_roles": self._merge_unique(profile.get("target_roles", []), [], max_items=6, item_limit=28),
+                "target_companies": self._merge_unique(
+                    profile.get("target_companies", []), [], max_items=6, item_limit=28
+                ),
+                "cities": self._merge_unique(profile.get("cities", []), [], max_items=4, item_limit=20),
+                "skills": self._merge_unique(profile.get("skills", []), [], max_items=12, item_limit=24),
+                "education_keywords": self._merge_unique(
+                    profile.get("education_keywords", []), [], max_items=6, item_limit=40
+                ),
+                "project_keywords": self._merge_unique(
+                    profile.get("project_keywords", []), [], max_items=8, item_limit=48
+                ),
+                "experience_keywords": self._merge_unique(
+                    profile.get("experience_keywords", []), [], max_items=8, item_limit=48
+                ),
+                "writing_preferences": self._merge_unique(
+                    profile.get("writing_preferences", []),
+                    base["profile"]["writing_preferences"],
+                    max_items=6,
+                    item_limit=24,
+                ),
+                "fact_guards": self._merge_unique(
+                    profile.get("fact_guards", []),
+                    base["profile"]["fact_guards"],
+                    max_items=4,
+                    item_limit=24,
+                ),
+            },
         }
-        return base
 
     def _fit_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         fitted = self._normalize_payload(payload)
@@ -133,9 +156,10 @@ class ProfileMemoryService:
             minimal = self._default_payload()
             minimal["username"] = fitted.get("username", "ft") or "ft"
             minimal["updated_at"] = self._now()
-            minimal["profile"]["writing_preferences"] = []
+            minimal["profile"]["writing_preferences"] = ["表达精炼"]
             minimal["profile"]["fact_guards"] = ["不得编造事实"]
             return minimal
+
         return fitted
 
     def load(self) -> Dict[str, Any]:
@@ -180,7 +204,7 @@ class ProfileMemoryService:
             for item in experiences
         ]
         writing_preferences = [
-            "保留更多细节" if profile_payload.get("use_full_information") else "表达精炼",
+            "尽量覆盖完整信息" if profile_payload.get("use_full_information") else "表达精炼",
             "优先优化已有简历" if workflow == "existing_resume" else "优先从零生成",
             "优先量化结果",
         ]
@@ -201,7 +225,7 @@ class ProfileMemoryService:
             profile.get("cities", []),
             [basic_info.get("city", "")],
             max_items=4,
-            item_limit=16,
+            item_limit=20,
         )
         profile["skills"] = self._merge_unique(
             profile.get("skills", []),
@@ -213,32 +237,31 @@ class ProfileMemoryService:
             profile.get("education_keywords", []),
             education_keywords,
             max_items=6,
-            item_limit=36,
+            item_limit=40,
         )
         profile["project_keywords"] = self._merge_unique(
             profile.get("project_keywords", []),
             project_keywords,
             max_items=8,
-            item_limit=40,
+            item_limit=48,
         )
         profile["experience_keywords"] = self._merge_unique(
             profile.get("experience_keywords", []),
             experience_keywords,
             max_items=8,
-            item_limit=40,
+            item_limit=48,
         )
         profile["writing_preferences"] = self._merge_unique(
             profile.get("writing_preferences", []),
             writing_preferences,
             max_items=6,
-            item_limit=18,
+            item_limit=24,
         )
         profile["fact_guards"] = self._merge_unique(
             profile.get("fact_guards", []),
             ["不得编造事实", "不得夸大经历", "优先使用用户提供信息"],
             max_items=4,
-            item_limit=18,
+            item_limit=24,
         )
         payload["updated_at"] = self._now()
-        payload["last_synced_from"] = workflow
         return self.save(payload)

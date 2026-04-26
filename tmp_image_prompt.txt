@@ -1,0 +1,59 @@
+﻿Create a polished presentation-ready horizontal flowchart infographic for a software project called "My Resume AI Project".
+
+Goal: one single slide image for a PPT, easy to read from a distance, professional, clean, modern, high information clarity.
+
+Language for all labels: Simplified Chinese.
+
+Canvas and style:
+- 16:9 landscape infographic
+- white or very light neutral background
+- clean product-design style, not hand-drawn
+- vector-like flat design, crisp edges, subtle shadows
+- use blue + cyan + teal accents with small warm highlights
+- strong visual hierarchy, large readable text, generous spacing
+- every box should be clearly separated and aligned
+- use arrows to show the main process from left to right
+- suitable for a business / technical presentation slide
+- avoid clutter, avoid tiny text, avoid watermark
+
+Title at top center:
+“AI简历生成项目流程图”
+
+Subtitle smaller:
+“前端交互 + 后端编排 + AI生成 + 结果导出”
+
+Main left-to-right workflow with 7 major stages, each stage in a rounded rectangle with a simple icon:
+1. “用户输入”
+   small bullets inside: “基础信息 / 求职方向 / 技能经历”
+2. “上传材料”
+   small bullets: “PDF / PPT / PPTX / 既有简历”
+3. “前端工作台”
+   small bullets: “信息编辑 / 实时预览 / 历史记录”
+4. “后端API编排”
+   small bullets: “FastAPI路由 / 文件解析 / 会话管理”
+5. “AI与检索增强”
+   small bullets: “问题追问 / 简历生成 / RAG参考 / ATS评分”
+6. “结果优化”
+   small bullets: “修改润色 / 版本快照 / 质量检查”
+7. “导出与记忆”
+   small bullets: “Markdown导出 / 工作区保存 / memory.json”
+
+Add two secondary side modules connected to the main flow:
+- Above stage 5, a smaller support box: “模型监控” with text “模型状态 / 可用性检测”
+- Below stage 5, a smaller support box: “岗位洞察” with text “岗位要求 / 网络搜索上下文”
+
+Add one small note area at bottom right:
+“技术栈：React + Vite + FastAPI + OpenAI + 本地记忆”
+
+Composition requirements:
+- arrows must be thick and obvious
+- layout must feel balanced and symmetric
+- Chinese text must be legible and not cramped
+- emphasize that the system forms a closed loop from input to generation to export to persistence
+- optionally add a faint return arrow from “导出与记忆” back toward “前端工作台” to indicate iterative optimization
+
+Important:
+- output only the infographic scene, no mockup, no laptop frame
+- no paragraphs, only short labels and bullets
+- ensure Chinese characters are accurate and readable
+- make it look like a premium SaaS architecture/process slide

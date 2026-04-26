@@ -3,13 +3,26 @@
 from __future__ import annotations
 
 import re
-from typing import List
+from typing import Any, Dict, List
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-DATE_PATTERN = re.compile(r"^\d{4}-\d{2}$")
-OPEN_ENDED_DATES = {"", "Present", "present", "至今"}
+DATE_PATTERN = re.compile(r"^(?P<year>\d{4})-(?P<month>\d{2})$")
+MONTH_PATTERN = re.compile(r"^(?P<year>\d{4})\s*(?:[-./年])\s*(?P<month>\d{1,2})\s*月?$")
+MONTH_TOKEN_PATTERN = re.compile(r"(?P<year>\d{4})\s*(?:[-./年])\s*(?P<month>\d{1,2})\s*月?")
+OPEN_ENDED_PATTERN = re.compile(r"^(?:present|current|now|ongoing|至今|现在|目前)$", re.IGNORECASE)
+RANGE_MARKER_PATTERN = re.compile(r"(?:到|至|~|～|-|—|–|－)")
+OPEN_ENDED_DATES = {
+    "",
+    "Present",
+    "Current",
+    "Now",
+    "Ongoing",
+    "至今",
+    "现在",
+    "目前",
+}
 
 
 class StrictModel(BaseModel):
@@ -32,17 +45,111 @@ def _clean_text_list(values: List[str], limit: int) -> List[str]:
     return cleaned
 
 
+def _invalid_month_error(field_name: str) -> ValueError:
+    """Return a consistent date validation error."""
+
+    return ValueError(f"{field_name} must be YYYY-MM or an allowed open-ended value.")
+
+
+def _normalize_month_token(year: str, month: str, field_name: str) -> str:
+    """Convert a year-month token into canonical YYYY-MM form."""
+
+    month_number = int(month)
+    if month_number < 1 or month_number > 12:
+        raise _invalid_month_error(field_name)
+    return f"{year}-{month_number:02d}"
+
+
+def _normalize_open_ended(value: str) -> str:
+    """Map open-ended date labels to one stable value."""
+
+    normalized = re.sub(r"\s+", "", (value or "").strip())
+    if not normalized:
+        return ""
+    if OPEN_ENDED_PATTERN.fullmatch(normalized):
+        return "Present"
+    return ""
+
+
+def _extract_period_bounds(value: str) -> tuple[str, str] | None:
+    """Parse a combined period string such as 2025年12月-2026年03月."""
+
+    cleaned = (value or "").strip()
+    if not cleaned:
+        return None
+
+    month_tokens = [
+        _normalize_month_token(match.group("year"), match.group("month"), "date")
+        for match in MONTH_TOKEN_PATTERN.finditer(cleaned)
+    ]
+    if len(month_tokens) >= 2:
+        return month_tokens[0], month_tokens[1]
+
+    remaining = re.sub(r"\s+", "", MONTH_TOKEN_PATTERN.sub("", cleaned))
+    if len(month_tokens) == 1 and (
+        any(token in remaining for token in ["至今", "现在", "目前"])
+        or any(token in remaining.lower() for token in ["present", "current", "now", "ongoing"])
+    ):
+        return month_tokens[0], "Present"
+
+    remaining_open_ended = _normalize_open_ended(RANGE_MARKER_PATTERN.sub("", remaining))
+    if len(month_tokens) == 1 and remaining_open_ended:
+        return month_tokens[0], remaining_open_ended
+
+    open_ended = _normalize_open_ended(cleaned)
+    if len(month_tokens) == 1 and open_ended:
+        return month_tokens[0], open_ended
+
+    if len(month_tokens) == 1 and remaining and RANGE_MARKER_PATTERN.search(remaining):
+        return month_tokens[0], open_ended
+
+    return None
+
+
+def _normalize_period_payload(value: Any) -> Any:
+    """Split combined date ranges before field-level validation runs."""
+
+    if not isinstance(value, dict):
+        return value
+
+    normalized: Dict[str, Any] = dict(value)
+    start_raw = normalized.get("start_date", "")
+    end_raw = normalized.get("end_date", "")
+
+    parsed_start = _extract_period_bounds(start_raw)
+    parsed_end = _extract_period_bounds(end_raw) if not parsed_start else None
+
+    if parsed_start:
+        normalized["start_date"], normalized["end_date"] = parsed_start
+    elif parsed_end:
+        normalized["start_date"], normalized["end_date"] = parsed_end
+
+    return normalized
+
+
 def _validate_month(value: str, field_name: str, allow_open_ended: bool = False) -> str:
     """Accept YYYY-MM and optionally open-ended values."""
 
     normalized = (value or "").strip()
     if not normalized:
         return ""
+
+    open_ended = _normalize_open_ended(normalized)
+    if allow_open_ended and open_ended:
+        return open_ended
+
+    exact_match = DATE_PATTERN.fullmatch(normalized)
+    if exact_match:
+        return _normalize_month_token(exact_match.group("year"), exact_match.group("month"), field_name)
+
+    month_match = MONTH_PATTERN.fullmatch(normalized)
+    if month_match:
+        return _normalize_month_token(month_match.group("year"), month_match.group("month"), field_name)
+
     if allow_open_ended and normalized in OPEN_ENDED_DATES:
-        return normalized
-    if DATE_PATTERN.fullmatch(normalized):
-        return normalized
-    raise ValueError(f"{field_name} must be YYYY-MM or an allowed open-ended value.")
+        return "Present" if normalized else ""
+
+    raise _invalid_month_error(field_name)
 
 
 class ResumeContact(StrictModel):
@@ -93,6 +200,11 @@ class ResumeEducationRecord(StrictModel):
         description="One to three short highlights such as GPA, honors, coursework, ranking, or competitions.",
     )
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_period_fields(cls, value: Any) -> Any:
+        return _normalize_period_payload(value)
+
     @field_validator("start_date")
     @classmethod
     def validate_start_date(cls, value: str) -> str:
@@ -134,6 +246,11 @@ class ResumeExperienceRecord(StrictModel):
         default_factory=list,
         description="Optional tools, systems, languages, or platforms directly used in this experience.",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_period_fields(cls, value: Any) -> Any:
+        return _normalize_period_payload(value)
 
     @field_validator("start_date")
     @classmethod
@@ -178,6 +295,11 @@ class ResumeProjectRecord(StrictModel):
         default_factory=list,
         description="Primary stack, tools, or platforms directly used in the project.",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_period_fields(cls, value: Any) -> Any:
+        return _normalize_period_payload(value)
 
     @field_validator("start_date")
     @classmethod
@@ -297,4 +419,3 @@ class ResumeRevisionResult(StrictModel):
     @classmethod
     def normalize_analysis_notes(cls, value: List[str]) -> List[str]:
         return _clean_text_list(value, limit=5)
-

@@ -3,6 +3,7 @@ frontend/node_modules/
 frontend/dist/
 frontend_app/node_modules/
 frontend_app/dist/
+frontend_app/.npm-cache/
 backend/uploads/*
 !backend/uploads/.gitkeep
 backend/__pycache__/
@@ -26,5 +27,9 @@ memory.json
 profile_memory.json
 .claude/
 .codex/
+.codex-logs/
+.project_notes/
+.vscode/
 tmp_*.html
 tmp_*.js
+backend/data/chroma/

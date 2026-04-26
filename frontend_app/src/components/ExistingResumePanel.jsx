@@ -31,10 +31,12 @@ export default function ExistingResumePanel({
   onBack,
   hasPendingQuestions,
   onOpenQuestions,
+  sectionIds = {},
 }) {
   return (
     <div className="subpage-flow">
       <JobTargetSection
+        id={sectionIds.jobTarget}
         jobInfo={jobInfo}
         onFieldChange={onJobFieldChange}
         title="目标岗位信息 · 现有简历优化"
@@ -56,7 +58,7 @@ export default function ExistingResumePanel({
         }
       />
 
-      <section className="paper-panel form-section-card p-6">
+      <section id={sectionIds.status} className="paper-panel form-section-card p-6">
         <div className="form-section-card__head">
           <div>
             <h3 className="form-section-card__title">资料状态</h3>
@@ -94,7 +96,7 @@ export default function ExistingResumePanel({
         </div>
       </section>
 
-      <section className="paper-panel form-section-card p-6">
+      <section id={sectionIds.source} className="paper-panel form-section-card p-6">
         <div className="form-section-card__head">
           <div>
             <h3 className="form-section-card__title">简历原文</h3>

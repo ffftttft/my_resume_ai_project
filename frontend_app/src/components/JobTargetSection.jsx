@@ -12,9 +12,10 @@ function Field({ label, children, hint }) {
   );
 }
 
-function TextInput({ value, onChange, placeholder }) {
+function TextInput({ value, onChange, placeholder, name }) {
   return (
     <input
+      name={name}
       value={value}
       onChange={(event) => onChange(event.target.value)}
       placeholder={placeholder}
@@ -23,9 +24,10 @@ function TextInput({ value, onChange, placeholder }) {
   );
 }
 
-function TextArea({ value, onChange, placeholder, rows = 6 }) {
+function TextArea({ value, onChange, placeholder, rows = 6, name }) {
   return (
     <textarea
+      name={name}
       value={value}
       onChange={(event) => onChange(event.target.value)}
       rows={rows}
@@ -36,6 +38,7 @@ function TextArea({ value, onChange, placeholder, rows = 6 }) {
 }
 
 export default function JobTargetSection({
+  id,
   jobInfo,
   onFieldChange,
   eyebrow = "",
@@ -45,7 +48,7 @@ export default function JobTargetSection({
   actions = null,
 }) {
   return (
-    <section className="paper-panel job-target p-6">
+    <section id={id} className="paper-panel job-target p-6">
       <div className="job-target__header">
         <div className="max-w-3xl">
           {eyebrow ? <p className="job-target__eyebrow">{eyebrow}</p> : null}
@@ -61,6 +64,7 @@ export default function JobTargetSection({
       <div className="job-target__grid">
         <Field label="目标公司">
           <TextInput
+            name="target_company"
             value={jobInfo.target_company}
             onChange={(value) => onFieldChange("target_company", value)}
             placeholder="例如：字节跳动 / 腾讯 / 阿里巴巴"
@@ -68,6 +72,7 @@ export default function JobTargetSection({
         </Field>
         <Field label="目标岗位">
           <TextInput
+            name="target_role"
             value={jobInfo.target_role}
             onChange={(value) => onFieldChange("target_role", value)}
             placeholder="例如：后端开发工程师"
@@ -78,6 +83,7 @@ export default function JobTargetSection({
       <div className="mt-4">
         <Field label="岗位要求" hint="建议直接粘贴 JD">
           <TextArea
+            name="job_requirements"
             value={jobInfo.job_requirements}
             onChange={(value) => onFieldChange("job_requirements", value)}
             rows={7}

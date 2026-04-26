@@ -1,5 +1,6 @@
 """Entry point for launching the FastAPI backend from the project root."""
 
+import os
 from pathlib import Path
 import sys
 
@@ -16,10 +17,10 @@ import uvicorn  # noqa: E402
 
 if __name__ == "__main__":
     # Example: python backend/run_local.py
+    reload_enabled = os.getenv("RESUME_BACKEND_RELOAD", "").strip().lower() in {"1", "true", "yes"}
     uvicorn.run(
         "app.main:app",
         host=settings.backend_host,
         port=settings.backend_port,
-        reload=True,
+        reload=reload_enabled,
     )
-

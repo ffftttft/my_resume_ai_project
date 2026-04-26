@@ -1,0 +1,40 @@
+﻿{
+  "profile": {
+    "basic_info": {
+      "name": "测试同学",
+      "target_company": "OpenAI",
+      "target_role": "后端开发实习生",
+      "job_requirements": "熟悉 Python、FastAPI、接口设计、数据处理",
+      "email": "demo@example.com",
+      "phone": "13800000000",
+      "city": "上海"
+    },
+    "skills": ["Python", "FastAPI", "SQL", "Git"],
+    "education": [
+      {
+        "school": "某大学",
+        "degree": "本科",
+        "major": "软件工程",
+        "start_date": "2022-09",
+        "end_date": "2026-06",
+        "highlights": ["主修软件工程与数据库系统"]
+      }
+    ],
+    "projects": [
+      {
+        "name": "智能简历系统",
+        "role": "后端开发",
+        "start_date": "2025-09",
+        "end_date": "2026-03",
+        "description": "负责简历生成接口与数据流转",
+        "highlights": ["实现流式生成接口", "完成简历导出与历史存档"]
+      }
+    ],
+    "experiences": [],
+    "modules": ["summary", "skills", "education", "projects", "experience"],
+    "membership_level": "basic",
+    "use_full_information": false,
+    "uploaded_context": "",
+    "additional_answers": []
+  }
+}

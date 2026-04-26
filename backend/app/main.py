@@ -6,10 +6,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from ai_modules.engine_v3 import ResumeAIEngine
 from app.config import settings
 from app.routers import resume as resume_router
+from app.services.embedding_service import EmbeddingService
 from app.services.file_service import FileService
+from app.services.job_search_service import JobSearchService
 from app.services.memory_service import MemoryService
 from app.services.profile_memory_service import ProfileMemoryService
+from app.services.rag_service import RagService
 from app.services.resume_service import ResumeService
+from app.services.semantic_ats_service import SemanticATSService
 
 
 memory_service = MemoryService(settings.memory_file)
@@ -23,10 +27,35 @@ ai_engine = ResumeAIEngine(
     base_url=settings.openai_base_url,
     model_name=settings.openai_model,
 )
+embedding_service = EmbeddingService(
+    api_key=settings.openai_embedding_api_key or settings.openai_api_key,
+    base_url=settings.openai_embedding_base_url or settings.openai_base_url,
+    model_name=settings.openai_embedding_model,
+    enabled=settings.openai_embeddings_enabled,
+    cooldown_seconds=settings.embedding_provider_cooldown_seconds,
+)
+rag_service = RagService(
+    embedding_service=embedding_service,
+    reference_dir=settings.rag_reference_dir,
+    top_k=settings.rag_top_k,
+    enabled=settings.rag_enabled,
+    backend=settings.rag_backend,
+    chroma_persist_dir=settings.rag_chroma_persist_dir,
+)
+job_search_service = JobSearchService(
+    api_key=settings.tavily_api_key,
+    enabled=settings.job_search_enabled,
+    ttl_seconds=settings.job_search_ttl_seconds,
+    max_results=settings.job_search_max_results,
+)
+semantic_ats_service = SemanticATSService(embedding_service=embedding_service)
 resume_service = ResumeService(
     memory_service=memory_service,
     profile_memory_service=profile_memory_service,
     ai_engine=ai_engine,
+    semantic_ats_service=semantic_ats_service,
+    rag_service=rag_service,
+    job_search_service=job_search_service,
 )
 
 app = FastAPI(

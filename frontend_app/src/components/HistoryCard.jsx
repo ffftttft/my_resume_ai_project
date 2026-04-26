@@ -65,19 +65,35 @@ function ActionButton({ label, onClick, tone = "default", disabled = false }) {
   );
 }
 
-function SnapshotItem({ item, onRestoreSnapshot, onDeleteSnapshot }) {
-  const targetCompany = item.target_company?.trim() || "未填写公司";
-  const targetRole = item.target_role?.trim() || "未填写岗位";
+function SnapshotItem({
+  item,
+  selected,
+  onSelectSnapshot,
+  onRestoreSnapshot,
+  onDeleteSnapshot,
+}) {
+  const title =
+    item.title?.trim() ||
+    [item.target_company?.trim(), item.target_role?.trim()].filter(Boolean).join(" / ") ||
+    "未命名简历快照";
+  const generationMode = item.generation_mode?.trim() || "fallback";
+  const noteCount = Array.isArray(item.analysis_notes) ? item.analysis_notes.length : 0;
 
   return (
-    <div className="history-entry">
+    <div className={`history-entry ${selected ? "history-entry--active" : ""}`}>
       <div className="history-entry__main">
         <p className="history-entry__time">{formatDateTime(item.timestamp)}</p>
-        <p className="history-entry__title">{targetCompany}</p>
-        <p className="history-entry__meta">岗位：{targetRole}</p>
+        <p className="history-entry__title">{title}</p>
+        <p className="history-entry__meta">
+          {item.target_role?.trim() || "未填写岗位"} · 模式 {generationMode}
+        </p>
+        <p className="history-entry__meta">
+          {noteCount > 0 ? `生成说明 ${noteCount} 条` : "暂无生成说明"}
+        </p>
       </div>
 
       <div className="history-entry__actions">
+        <ActionButton label={selected ? "已查看说明" : "查看说明"} onClick={() => onSelectSnapshot(item)} tone="accent" />
         <ActionButton label="恢复" onClick={() => onRestoreSnapshot(item)} />
         <ActionButton label="删除" onClick={() => onDeleteSnapshot(item)} tone="danger" />
       </div>
@@ -142,6 +158,8 @@ function ExportItem({ item, onPreviewExport, onRedownloadExport, onDeleteExport 
 
 export default function HistoryCard({
   memory,
+  selectedSnapshotTimestamp,
+  onSelectSnapshot,
   onRestoreSnapshot,
   onDeleteSnapshot,
   onPreviewUpload,
@@ -154,7 +172,7 @@ export default function HistoryCard({
     [
       item?.original_name?.trim(),
       item?.file_type?.trim(),
-      item?.extracted_text_preview?.trim(),
+      item?.saved_name?.trim(),
       item?.todo_notice?.trim(),
     ]
       .filter(Boolean)
@@ -167,6 +185,7 @@ export default function HistoryCard({
   );
   const snapshots = pickLatestDistinct(memory?.resume_snapshots || [], (item) =>
     [
+      item?.title?.trim(),
       item?.target_company?.trim(),
       item?.target_role?.trim(),
       item?.generation_mode?.trim(),
@@ -177,13 +196,13 @@ export default function HistoryCard({
   );
 
   return (
-    <section className="paper-panel history-board p-6">
+    <section className="history-board rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
       <div className="history-board__header">
         <div>
-          <p className="history-board__eyebrow">历史归档</p>
-          <h3 className="history-board__title">本地历史档案</h3>
+          <p className="history-board__eyebrow">历史档案</p>
+          <h3 className="history-board__title">本地历史记录</h3>
           <p className="history-board__description">
-            集中查看快照、上传与导出记录。重复条目会自动合并，仅保留最新记录。
+            快照、上传和导出记录都收在这里。重复内容会自动合并，只保留最新一条。
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -193,60 +212,60 @@ export default function HistoryCard({
         </div>
       </div>
 
-      <div className="history-board__grid">
-        <SectionBlock title="简历快照" subtitle="可恢复到当前编辑区，也可直接删除。" count={snapshots.length}>
-          {snapshots.length > 0 ? (
-            snapshots.map((item, index) => (
-              <SnapshotItem
-                key={`${item.timestamp}-${index}`}
-                item={item}
-                onRestoreSnapshot={onRestoreSnapshot}
-                onDeleteSnapshot={onDeleteSnapshot}
-              />
-            ))
-          ) : (
-            <p className="text-sm text-[var(--muted)]">还没有简历快照。</p>
-          )}
-        </SectionBlock>
+      <div className="history-board__scroll custom-scrollbar">
+        <div className="history-board__grid">
+          <SectionBlock title="简历快照" subtitle="可以切换查看说明，也可以恢复到当前工作区。" count={snapshots.length}>
+            {snapshots.length > 0 ? (
+              snapshots.map((item, index) => (
+                <SnapshotItem
+                  key={`${item.timestamp}-${index}`}
+                  item={item}
+                  selected={selectedSnapshotTimestamp === item.timestamp}
+                  onSelectSnapshot={onSelectSnapshot}
+                  onRestoreSnapshot={onRestoreSnapshot}
+                  onDeleteSnapshot={onDeleteSnapshot}
+                />
+              ))
+            ) : (
+              <p className="text-sm text-[var(--muted)]">还没有简历快照。</p>
+            )}
+          </SectionBlock>
 
-        <SectionBlock
-          title="上传记录"
-          subtitle="支持在线预览与删除，删除后会同时清理本地上传文件。"
-          count={uploads.length}
-        >
-          {uploads.length > 0 ? (
-            uploads.map((item, index) => (
-              <UploadItem
-                key={`${item.saved_name || item.original_name}-${index}`}
-                item={item}
-                onPreviewUpload={onPreviewUpload}
-                onDeleteUpload={onDeleteUpload}
-              />
-            ))
-          ) : (
-            <p className="text-sm text-[var(--muted)]">还没有上传记录。</p>
-          )}
-        </SectionBlock>
+          <SectionBlock
+            title="上传记录"
+            subtitle="支持在线预览与删除，删除后会同时清理本地上传文件。"
+            count={uploads.length}
+          >
+            {uploads.length > 0 ? (
+              uploads.map((item, index) => (
+                <UploadItem
+                  key={`${item.saved_name || item.original_name}-${index}`}
+                  item={item}
+                  onPreviewUpload={onPreviewUpload}
+                  onDeleteUpload={onDeleteUpload}
+                />
+              ))
+            ) : (
+              <p className="text-sm text-[var(--muted)]">还没有上传记录。</p>
+            )}
+          </SectionBlock>
 
-        <SectionBlock
-          title="导出记录"
-          subtitle="支持在线预览、重新下载与删除。"
-          count={downloads.length}
-        >
-          {downloads.length > 0 ? (
-            downloads.map((item, index) => (
-              <ExportItem
-                key={`${item.file_name}-${item.timestamp || index}`}
-                item={item}
-                onPreviewExport={onPreviewExport}
-                onRedownloadExport={onRedownloadExport}
-                onDeleteExport={onDeleteExport}
-              />
-            ))
-          ) : (
-            <p className="text-sm text-[var(--muted)]">还没有导出记录。</p>
-          )}
-        </SectionBlock>
+          <SectionBlock title="导出记录" subtitle="支持在线预览、重新下载与删除。" count={downloads.length}>
+            {downloads.length > 0 ? (
+              downloads.map((item, index) => (
+                <ExportItem
+                  key={`${item.file_name}-${item.timestamp || index}`}
+                  item={item}
+                  onPreviewExport={onPreviewExport}
+                  onRedownloadExport={onRedownloadExport}
+                  onDeleteExport={onDeleteExport}
+                />
+              ))
+            ) : (
+              <p className="text-sm text-[var(--muted)]">还没有导出记录。</p>
+            )}
+          </SectionBlock>
+        </div>
       </div>
     </section>
   );

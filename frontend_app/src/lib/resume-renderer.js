@@ -67,7 +67,7 @@ function renderSummary(summary) {
     return [];
   }
 
-  return ["## 个人总结", `- ${text}`, ""];
+  return ["## 个人总结", "", text, ""];
 }
 
 function renderSkills(skillCategories = []) {

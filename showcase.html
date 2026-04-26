@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智简 AI - 基于 RAG 与语义分析的个性化简历优化平台</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --neon-pink: #FF006E;
+            --neon-green: #00F5A0;
+            --electric-cyan: #00D9FF;
+            --deep-black: #0A0A0F;
+            --dark-gray: #1A1A24;
+            --text-primary: #FFFFFF;
+            --text-secondary: #B4B4C8;
+        }
+
+        body {
+            font-family: 'DM Sans', sans-serif;
+            background: var(--deep-black);
+            color: var(--text-primary);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        h1, h2, h3 {
+            font-family: 'Space Grotesk', sans-serif;
+            font-weight: 700;
+        }
+
+        /* Animated Background */
+        .bg-grid {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image:
+                linear-gradient(rgba(0, 245, 160, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 245, 160, 0.03) 1px, transparent 1px);
+            background-size: 50px 50px;
+            z-index: 0;
+            animation: gridMove 20s linear infinite;
+        }
+
+        @keyframes gridMove {
+            0% { transform: translate(0, 0); }
+            100% { transform: translate(50px, 50px); }
+        }
+
+        .container {
+            position: relative;
+            z-index: 1;
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0 2rem;
+        }
+
+        /* Hero Section */
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            padding: 4rem 0;
+        }
+
+        .hero h1 {
+            font-size: clamp(3rem, 8vw, 6rem);
+            margin-bottom: 1.5rem;
+            background: linear-gradient(135deg, var(--neon-pink), var(--neon-green));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            animation: glow 3s ease-in-out infinite alternate;
+        }
+
+        @keyframes glow {
+            from {
+                filter: drop-shadow(0 0 20px rgba(255, 0, 110, 0.5));
+            }
+            to {
+                filter: drop-shadow(0 0 40px rgba(0, 245, 160, 0.5));
+            }
+        }
+
+        .hero-subtitle {
+            font-size: clamp(1.2rem, 3vw, 1.8rem);
+            color: var(--text-secondary);
+            margin-bottom: 1rem;
+            font-weight: 500;
+        }
+
+        .hero-description {
+            font-size: 1.1rem;
+            color: var(--text-secondary);
+            max-width: 800px;
+            margin: 0 auto 3rem;
+        }
+
+        /* CTA Button */
+        .cta-button {
+            display: inline-block;
+            padding: 1.2rem 3rem;
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--deep-black);
+            background: linear-gradient(135deg, var(--neon-pink), var(--electric-cyan));
+            border: none;
+            border-radius: 50px;
+            cursor: pointer;
+            text-decoration: none;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .cta-button::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, var(--neon-green), var(--neon-pink));
+            transition: left 0.3s ease;
+        }
+
+        .cta-button:hover::before {
+            left: 0;
+        }
+
+        .cta-button span {
+            position: relative;
+            z-index: 1;
+        }
+
+        /* Tech Stack Section */
+        .tech-stack {
+            padding: 6rem 0;
+        }
+
+        .section-title {
+            font-size: clamp(2rem, 5vw, 3.5rem);
+            text-align: center;
+            margin-bottom: 4rem;
+            color: var(--neon-green);
+        }
+
+        .tech-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 2rem;
+            margin-bottom: 4rem;
+        }
+
+        .tech-card {
+            background: var(--dark-gray);
+            border: 2px solid rgba(0, 245, 160, 0.2);
+            border-radius: 20px;
+            padding: 2.5rem;
+            text-align: center;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .tech-card:hover {
+            border-color: var(--neon-green);
+            transform: translateY(-10px);
+            box-shadow: 0 20px 40px rgba(0, 245, 160, 0.2);
+        }
+
+        .tech-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+
+        .tech-name {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--neon-pink);
+            margin-bottom: 0.5rem;
+        }
+
+        .tech-description {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+        }
+
+        /* Features Section */
+        .features {
+            padding: 6rem 0;
+            background: linear-gradient(180deg, transparent, rgba(255, 0, 110, 0.05), transparent);
+        }
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 3rem;
+        }
+
+        .feature-card {
+            background: var(--dark-gray);
+            border: 2px solid rgba(255, 0, 110, 0.2);
+            border-radius: 20px;
+            padding: 3rem;
+            transition: all 0.3s ease;
+        }
+
+        .feature-card:hover {
+            border-color: var(--neon-pink);
+            transform: scale(1.05);
+            box-shadow: 0 20px 40px rgba(255, 0, 110, 0.3);
+        }
+
+        .feature-number {
+            font-size: 3rem;
+            font-weight: 700;
+            color: var(--neon-green);
+            margin-bottom: 1rem;
+        }
+
+        .feature-title {
+            font-size: 1.8rem;
+            margin-bottom: 1rem;
+            color: var(--text-primary);
+        }
+
+        .feature-text {
+            color: var(--text-secondary);
+            line-height: 1.8;
+        }
+
+        /* Competition Info */
+        .competition {
+            padding: 6rem 0;
+            text-align: center;
+        }
+
+        .competition-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, var(--neon-pink), var(--electric-cyan));
+            padding: 2rem 4rem;
+            border-radius: 20px;
+            margin-bottom: 2rem;
+        }
+
+        .competition-title {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: var(--deep-black);
+        }
+
+        .competition-subtitle {
+            font-size: 1.2rem;
+            color: rgba(10, 10, 15, 0.8);
+            margin-top: 0.5rem;
+        }
+
+        /* Footer */
+        .footer {
+            padding: 4rem 0 2rem;
+            text-align: center;
+            border-top: 1px solid rgba(0, 245, 160, 0.1);
+        }
+
+        .footer-text {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .hero h1 {
+                font-size: 2.5rem;
+            }
+
+            .tech-grid,
+            .features-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .container {
+                padding: 0 1rem;
+            }
+        }
+
+        /* Scroll Indicator */
+        .scroll-indicator {
+            position: absolute;
+            bottom: 2rem;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 30px;
+            height: 50px;
+            border: 2px solid var(--neon-green);
+            border-radius: 25px;
+            display: flex;
+            justify-content: center;
+            padding-top: 8px;
+        }
+
+        .scroll-indicator::before {
+            content: '';
+            width: 6px;
+            height: 10px;
+            background: var(--neon-green);
+            border-radius: 3px;
+            animation: scroll 2s infinite;
+        }
+
+        @keyframes scroll {
+            0%, 100% {
+                transform: translateY(0);
+                opacity: 1;
+            }
+            50% {
+                transform: translateY(15px);
+                opacity: 0.5;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="bg-grid"></div>
+
+    <div class="container">
+        <!-- Hero Section -->
+        <section class="hero">
+            <h1>智简 AI</h1>
+            <p class="hero-subtitle">基于 RAG 与语义分析的个性化简历优化平台</p>
+            <p class="hero-description">
+                利用先进的检索增强生成技术和语义分析,为每位求职者打造最适合目标岗位的个性化简历
+            </p>
+            <a href="#tech" class="cta-button">
+                <span>探索技术架构</span>
+            </a>
+            <div class="scroll-indicator"></div>
+        </section>
+
+        <!-- Tech Stack Section -->
+        <section id="tech" class="tech-stack">
+            <h2 class="section-title">核心技术栈</h2>
+            <div class="tech-grid">
+                <div class="tech-card">
+                    <div class="tech-icon">⚡</div>
+                    <h3 class="tech-name">FastAPI</h3>
+                    <p class="tech-description">高性能异步后端框架,提供极速API响应</p>
+                </div>
+                <div class="tech-card">
+                    <div class="tech-icon">⚛️</div>
+                    <h3 class="tech-name">React 19</h3>
+                    <p class="tech-description">最新前端框架,打造流畅用户体验</p>
+                </div>
+                <div class="tech-card">
+                    <div class="tech-icon">🗄️</div>
+                    <h3 class="tech-name">ChromaDB</h3>
+                    <p class="tech-description">向量数据库,实现高效语义检索</p>
+                </div>
+                <div class="tech-card">
+                    <div class="tech-icon">🔍</div>
+                    <h3 class="tech-name">Tavily</h3>
+                    <p class="tech-description">智能搜索引擎,获取最新行业信息</p>
+                </div>
+                <div class="tech-card">
+                    <div class="tech-icon">🤖</div>
+                    <h3 class="tech-name">Anthropic Claude</h3>
+                    <p class="tech-description">先进AI模型,提供智能内容生成</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Features Section -->
+        <section class="features">
+            <h2 class="section-title">核心功能</h2>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-number">01</div>
+                    <h3 class="feature-title">RAG 检索增强</h3>
+                    <p class="feature-text">
+                        基于向量数据库的语义检索,从海量优秀简历中提取最相关的表达方式和内容结构,为你的简历提供专业参考
+                    </p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-number">02</div>
+                    <h3 class="feature-title">语义分析优化</h3>
+                    <p class="feature-text">
+                        深度分析岗位需求与个人经历的语义匹配度,智能调整简历内容,突出与目标岗位最相关的技能和经验
+                    </p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-number">03</div>
+                    <h3 class="feature-title">个性化定制</h3>
+                    <p class="feature-text">
+                        根据不同行业、岗位和公司文化,生成多版本个性化简历,让每一份简历都精准匹配目标职位
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Competition Info -->
+        <section class="competition">
+            <div class="competition-badge">
+                <h3 class="competition-title">全国大学生计算机程序设计大赛</h3>
+                <p class="competition-subtitle">软件应用与开发 (Web 应用与开发)</p>
+            </div>
+        </section>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p class="footer-text">© 2026 智简 AI. Powered by Advanced AI Technology.</p>
+        </footer>
+    </div>
+</body>
+</html>

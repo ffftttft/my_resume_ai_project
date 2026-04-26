@@ -1,0 +1,392 @@
+[
+  {
+    "id": "cn-backend-java-mid-01",
+    "title": "中文后端工程师参考片段 A",
+    "role": "Java开发工程师",
+    "industry": "互联网平台",
+    "summary": "突出接口稳定性、服务治理、数据库优化和项目结果量化，适合 3-5 年后端岗位。",
+    "skills": ["Java", "Spring Boot", "MySQL", "Redis", "接口设计", "性能优化"],
+    "bullets": [
+      "围绕核心交易或用户中心链路优化接口性能，强调响应耗时、稳定性和故障恢复指标。",
+      "补充缓存、消息队列、监控告警和发布流程改造，让工程能力不只停留在功能开发。 "
+    ],
+    "source_title": "Java开发工程师求职简历模板 | 超级简历WonderCV",
+    "source_url": "https://www.wondercv.com/jianlimoban/38756b01313815ca.html",
+    "source_note": "基于公开中文模板中的岗位亮点和写作建议匿名化重组，不保留原始个人身份信息。"
+  },
+  {
+    "id": "cn-backend-api-mid-02",
+    "title": "中文后端工程师参考片段 B",
+    "role": "后端开发工程师",
+    "industry": "企业服务",
+    "summary": "强调 API 设计、业务抽象和跨团队协作，适合服务端岗位对接复杂业务场景。",
+    "skills": ["Java", "Spring Cloud", "PostgreSQL", "Redis", "Docker", "微服务"],
+    "bullets": [
+      "描述从需求拆解到服务落地的完整链路，突出高并发、幂等、容错和日志追踪能力。",
+      "用业务指标收尾，例如支付成功率、核心链路稳定性、部署效率或工单处理时长改善。"
+    ],
+    "source_title": "3-5年工作经验简历模板 | 超级简历WonderCV",
+    "source_url": "https://www.wondercv.com/jianlimoban/2180006943b1c634.html",
+    "source_note": "结合中文通用社招模板对后端岗位的经验展示方式做匿名化提炼。"
+  },
+  {
+    "id": "cn-frontend-mid-01",
+    "title": "中文前端工程师参考片段 A",
+    "role": "前端开发工程师",
+    "industry": "互联网产品",
+    "summary": "突出 JavaScript 主栈、复杂页面性能优化和项目成果量化，适合 3-5 年跳槽场景。",
+    "skills": ["JavaScript", "React", "Vue", "TypeScript", "性能优化", "组件化"],
+    "bullets": [
+      "重点写复杂页面或核心转化链路的性能优化结果，例如首屏加载、交互响应和转化率提升。",
+      "展示组件库、工程化规范、埋点分析和跨端协作经验，让前端价值与业务结果绑定。"
+    ],
+    "source_title": "前端开发工程师跳槽简历模板 | 超级简历WonderCV",
+    "source_url": "https://www.wondercv.com/jianlimoban/881b41d4a14cdb68.html",
+    "source_note": "根据中文公开模板中的写作技巧和岗位亮点做结构化转写。"
+  },
+  {
+    "id": "cn-frontend-junior-02",
+    "title": "中文前端工程师参考片段 B",
+    "role": "前端开发工程师",
+    "industry": "校招 / 初级开发",
+    "summary": "适合 1-3 年或校招场景，强调项目经历、技术栈清晰度和学习能力。",
+    "skills": ["HTML", "CSS", "JavaScript", "React", "Vue", "调试能力"],
+    "bullets": [
+      "把校内项目或实习经历拆成问题、动作、结果三段，避免只写‘负责页面开发’。",
+      "补充组件封装、接口联调、跨浏览器兼容或可访问性改造等具体动作，提高可信度。"
+    ],
+    "source_title": "一年经验前端开发求职简历模板 | 超级简历WonderCV",
+    "source_url": "https://www.wondercv.com/jianlimoban/b2ae4f4549999042.html",
+    "source_note": "基于中文初中级前端模板的内容建议匿名化整理。"
+  },
+  {
+    "id": "cn-frontend-h5-senior-03",
+    "title": "中文 H5 前端参考片段",
+    "role": "H5资深前端工程师",
+    "industry": "移动互联网",
+    "summary": "强调 H5 活动页、移动端性能和营销场景转化，适合活动增长方向前端岗位。",
+    "skills": ["JavaScript", "H5", "React", "埋点分析", "动画交互", "移动端适配"],
+    "bullets": [
+      "描述活动页搭建平台、组件复用和移动端适配经验，突出上线效率与质量控制。",
+      "写清活动参与率、转化率、分享率或页面性能指标，避免只有视觉实现没有业务闭环。"
+    ],
+    "source_title": "H5资深前端工程师简历模板 | 超级简历WonderCV",
+    "source_url": "https://www.wondercv.com/jianlimoban/4nqBwSw.html",
+    "source_note": "基于中文 H5 前端模板和公开写作建议进行匿名化提炼。"
+  },
+  {
+    "id": "cn-ui-mid-01",
+    "title": "中文 UI 设计师参考片段 A",
+    "role": "UI设计师",
+    "industry": "互联网设计",
+    "summary": "突出设计工具、项目成果和用户体验指标，适合 3-5 年 UI / UX 方向。",
+    "skills": ["Figma", "Sketch", "Adobe XD", "交互设计", "设计系统", "用户体验"],
+    "bullets": [
+      "采用 STAR 方式写设计项目，说明改版目标、设计方法、交付物与最终转化结果。",
+      "补充设计系统、组件规范、开发协同和可用性测试经验，体现不仅会出图，还能推动落地。"
+    ],
+    "source_title": "UI设计师求职简历模板 | 超级简历WonderCV",
+    "source_url": "https://www.wondercv.com/jianlimoban/79b9daac3bd0dd07.html",
+    "source_note": "根据中文 UI 设计师模板中的亮点和写作技巧整理。"
+  },
+  {
+    "id": "cn-ui-junior-02",
+    "title": "中文 UI 助理参考片段",
+    "role": "UI设计助理",
+    "industry": "设计 / 校招",
+    "summary": "适合初级或助理岗位，强调作品集、协作能力和成长潜力。",
+    "skills": ["Figma", "PS", "AI", "设计规范", "组件拆解", "作品集整理"],
+    "bullets": [
+      "把实习或课程项目写成完整任务闭环，例如从低保真到高保真、再到设计走查与交付。",
+      "强调协助主设计师推进小程序、活动页或后台系统设计的具体产出，而非泛泛表态。"
+    ],
+    "source_title": "应届生UI设计助理简历模板 | 超级简历WonderCV",
+    "source_url": "https://www.wondercv.com/jianlimoban/dde3a439984d255c.html",
+    "source_note": "基于中文应届生设计模板做匿名化重写。"
+  },
+  {
+    "id": "cn-data-transfer-01",
+    "title": "中文数据分析师参考片段 A",
+    "role": "数据分析师",
+    "industry": "互联网 / 转型",
+    "summary": "突出分析思维、数据工具和成果量化，适合 3-5 年跨岗转型的数据分析岗位。",
+    "skills": ["SQL", "Python", "Tableau", "Power BI", "A/B Test", "统计分析"],
+    "bullets": [
+      "把转型前的业务经验转成分析价值，例如指标体系搭建、流程洞察、业务诊断和结论落地。",
+      "用数据说话，写清分析结论带来的转化率、留存、成本或效率改善。"
+    ],
+    "source_title": "3-5年经验数据分析师转型简历模板 | 超级简历WonderCV",
+    "source_url": "https://www.wondercv.com/jianlimoban/9b160c749273a8bf.html",
+    "source_note": "基于中文数据分析转型模板提炼出的匿名参考片段。"
+  },
+  {
+    "id": "cn-data-python-02",
+    "title": "中文数据分析师参考片段 B",
+    "role": "Python数据分析师",
+    "industry": "数据平台",
+    "summary": "强调 Python 自动化分析、可视化和业务洞察，适合进阶型分析岗位。",
+    "skills": ["Python", "SQL", "Pandas", "BI可视化", "实验分析", "数据建模"],
+    "bullets": [
+      "突出自动化报表、指标监控和专题分析项目，说明如何减少人工处理成本。",
+      "写清模型或分析框架怎样支持营销、运营或产品决策，而不是停留在‘完成分析报告’。"
+    ],
+    "source_title": "Python数据分析师晋级简历模板 | 超级简历WonderCV",
+    "source_url": "https://www.wondercv.com/jianlimoban/2c17cd9665798b67.html",
+    "source_note": "根据中文 Python 数据分析师模板中的技能重点与成果导向建议匿名化重组。"
+  },
+  {
+    "id": "cn-data-business-03",
+    "title": "中文商业数据分析参考片段",
+    "role": "商业数据分析师",
+    "industry": "商业分析",
+    "summary": "适合商业分析、经营分析和增长分析，强调业务理解与分析闭环。",
+    "skills": ["SQL", "业务分析", "经营指标", "数据看板", "预测分析", "汇报表达"],
+    "bullets": [
+      "围绕 GMV、转化率、复购率、毛利等核心经营指标组织经历，体现对业务的理解深度。",
+      "除了分析过程，还要写清向管理层输出的结论和后续被采纳的策略动作。"
+    ],
+    "source_title": "商业数据分析师简历模板 | 超级简历WonderCV",
+    "source_url": "https://www.wondercv.com/jianlimoban/kZ84i88.html",
+    "source_note": "基于中文商业数据分析模板的公开内容做匿名化参考整理。"
+  },
+  {
+    "id": "cn-data-logistics-04",
+    "title": "中文物流数据分析参考片段",
+    "role": "物流数据分析专员",
+    "industry": "物流 / 供应链",
+    "summary": "强调履约、仓配、时效和异常分析，适合物流或供应链方向的数据岗位。",
+    "skills": ["SQL", "Excel", "Python", "供应链分析", "时效监控", "异常归因"],
+    "bullets": [
+      "将数据分析与履约时效、仓库周转、异常工单、运输成本等供应链指标挂钩。",
+      "强调跨仓储、运营、客服等团队协作推动优化方案落地的经历。"
+    ],
+    "source_title": "物流数据分析专员简历模板 | 超级简历WonderCV",
+    "source_url": "https://www.wondercv.com/jianlimoban/68aEl_I.html",
+    "source_note": "参考中文物流数据分析模板中的行业侧重点进行匿名化提炼。"
+  },
+  {
+    "id": "cn-platform-ops-01",
+    "title": "中文平台运营参考片段",
+    "role": "平台运营经理",
+    "industry": "平台增长",
+    "summary": "强调用户增长、活跃提升、策略执行和数据驱动决策，适合平台运营岗位。",
+    "skills": ["用户增长", "数据分析", "活动策划", "生命周期运营", "策略优化", "跨团队协作"],
+    "bullets": [
+      "突出活跃、留存、转化和平台供需平衡等指标，展示运营策略如何转化为结果。",
+      "补充与产品、数据、技术协同推动功能或机制优化的经历，体现运营不是单点执行。"
+    ],
+    "source_title": "平台运营经理简历模板 | 超级简历WonderCV",
+    "source_url": "https://www.wondercv.com/jianlimoban/d7d6e54e88a6917e.html",
+    "source_note": "基于中文平台运营经理模板的公开写作提示做匿名化重组。"
+  },
+  {
+    "id": "cn-ecommerce-ops-02",
+    "title": "中文电商运营参考片段",
+    "role": "电商运营经理",
+    "industry": "电子商务",
+    "summary": "强调商品、流量、转化和营销活动协同，适合电商平台与品牌运营岗位。",
+    "skills": ["电商运营", "活动策划", "商品运营", "转化优化", "数据分析", "投放协同"],
+    "bullets": [
+      "围绕大促、日销、商品结构和投放协同组织项目经历，补充 GMV、客单价与转化率指标。",
+      "展示与供应链、客服、设计和投放团队联动，形成完整的运营闭环。"
+    ],
+    "source_title": "电商运营经理求职模板 | 超级简历WonderCV",
+    "source_url": "https://www.wondercv.com/jianlimoban/e5f8b62e60836ca8.html",
+    "source_note": "根据中文电商运营模板的岗位重点匿名化提炼。"
+  },
+  {
+    "id": "cn-data-ops-03",
+    "title": "中文数据运营参考片段",
+    "role": "数据运营专家",
+    "industry": "数据运营",
+    "summary": "强调指标运营、活动复盘和增长分析，适合数据运营与精细化运营岗位。",
+    "skills": ["数据运营", "用户增长", "活动复盘", "效果评估", "SQL", "运营策略"],
+    "bullets": [
+      "说明如何建立运营指标看板、分析活动效果并迭代策略，而不是仅罗列日常动作。",
+      "写清数据洞察如何支撑用户分层、留存提升或渠道优化。"
+    ],
+    "source_title": "数据运营专家求职模板 | 超级简历WonderCV",
+    "source_url": "https://www.wondercv.com/jianlimoban/afb63350ec3db7b6.html",
+    "source_note": "结合中文数据运营模板公开内容做结构化改写。"
+  },
+  {
+    "id": "cn-content-ops-04",
+    "title": "中文内容运营参考片段",
+    "role": "内容运营主管",
+    "industry": "内容平台",
+    "summary": "突出内容策略、社区管理和用户增长，适合内容运营和社区方向岗位。",
+    "skills": ["内容策划", "社区运营", "用户增长", "数据复盘", "活动策划", "内容分发"],
+    "bullets": [
+      "把内容选题、分发机制、社群互动和增长结果串成闭环，体现内容对业务的贡献。",
+      "补充内容生产流程、作者协同或审核机制优化，增强组织能力表达。"
+    ],
+    "source_title": "内容运营主管简历模板 | 超级简历WonderCV",
+    "source_url": "https://www.wondercv.com/jianlimoban/bed7f542225f46ae.html",
+    "source_note": "基于中文内容运营主管模板中的岗位重点匿名化转写。"
+  },
+  {
+    "id": "cn-newmedia-lead-05",
+    "title": "中文新媒体运营参考片段",
+    "role": "新媒体运营负责人",
+    "industry": "内容营销",
+    "summary": "强调内容策略、粉丝增长、活动策划与数据复盘，适合新媒体负责人岗位。",
+    "skills": ["内容运营", "新媒体策略", "用户增长", "活动策划", "数据分析", "品牌传播"],
+    "bullets": [
+      "用涨粉、互动率、线索量、阅读量和转化等指标量化内容策略成效。",
+      "展示从选题、创作、发布到复盘的完整链路，以及多平台协同打法。"
+    ],
+    "source_title": "新媒体运营负责人简历模板 | 超级简历WonderCV",
+    "source_url": "https://www.wondercv.com/jianlimoban/822dab795d0d4b80.html",
+    "source_note": "根据中文新媒体运营负责人模板的亮点和写作建议整理。"
+  },
+  {
+    "id": "cn-community-ops-06",
+    "title": "中文社区运营参考片段",
+    "role": "新媒体社区运营专员",
+    "industry": "社区运营",
+    "summary": "适合社区、社群和内容互动方向，强调用户互动和平台氛围维护。",
+    "skills": ["社群运营", "内容互动", "活动执行", "用户维护", "KPI跟踪", "社区规则"],
+    "bullets": [
+      "突出社群活跃、用户留存、UGC 产出和活动参与等指标，让社区价值可量化。",
+      "写清规则设计、舆情响应和用户反馈闭环，体现运营的稳定性和判断力。"
+    ],
+    "source_title": "新媒体社区运营专员简历模板 | 超级简历WonderCV",
+    "source_url": "https://www.wondercv.com/jianlimoban/0hDyMdM.html",
+    "source_note": "基于中文社区运营模板中的工作重点匿名化提炼。"
+  },
+  {
+    "id": "cn-product-mid-01",
+    "title": "中文产品经理参考片段 A",
+    "role": "产品经理",
+    "industry": "互联网产品",
+    "summary": "突出需求拆解、跨团队协作、上线复盘和结果导向，适合 3-5 年产品经理岗位。",
+    "skills": ["需求分析", "PRD", "数据分析", "跨团队协作", "项目推进", "用户洞察"],
+    "bullets": [
+      "用问题定义、方案设计、推进上线和指标复盘的顺序组织经历，强调真正主导的决策动作。",
+      "将 DAU、转化率、留存、工单效率或业务流程时长等指标与产品动作绑定。"
+    ],
+    "source_title": "产品经理求职简历模板 | 超级简历WonderCV",
+    "source_url": "https://www.wondercv.com/jianlimoban/ff36b9d2b041cde0.html",
+    "source_note": "根据中文产品经理模板和岗位共性写作逻辑做匿名化整理。"
+  },
+  {
+    "id": "cn-product-game-02",
+    "title": "中文游戏产品经理参考片段",
+    "role": "游戏产品经理",
+    "industry": "游戏",
+    "summary": "强调玩法设计、版本迭代、数值平衡和用户反馈闭环，适合游戏行业产品岗位。",
+    "skills": ["玩法设计", "版本规划", "数据复盘", "用户反馈", "竞品分析", "项目推进"],
+    "bullets": [
+      "写清版本迭代、核心玩法验证和关键指标跟踪，例如留存、付费率或活跃度变化。",
+      "突出与策划、研发、运营、商业化团队协作的能力，体现游戏产品经理的综合推进力。"
+    ],
+    "source_title": "游戏产品经理简历模板 | 超级简历WonderCV",
+    "source_url": "https://www.wondercv.com/jianlimoban/npfws_A.html",
+    "source_note": "基于中文游戏产品经理模板的公开描述做匿名化重组。"
+  },
+  {
+    "id": "cn-project-manager-03",
+    "title": "中文项目经理参考片段",
+    "role": "项目经理",
+    "industry": "项目管理",
+    "summary": "强调项目管理、跨部门协同和风险控制，也可作为产品/项目推进型岗位参考。",
+    "skills": ["项目管理", "范围管理", "风险控制", "跨团队协作", "进度管理", "复盘机制"],
+    "bullets": [
+      "使用 STAR 结构描述项目推进过程，并用交付周期、预算、满意度等指标量化结果。",
+      "写清协调资源、识别风险和推动闭环的具体动作，避免只写‘负责项目管理’。"
+    ],
+    "source_title": "项目经理简历模板 | 超级简历WonderCV",
+    "source_url": "https://www.wondercv.com/jianlimoban/594d07076f456729.html",
+    "source_note": "源自中文项目经理模板的管理型表达框架，已匿名化处理。"
+  },
+  {
+    "id": "cn-devops-junior-01",
+    "title": "中文运维工程师参考片段",
+    "role": "系统维护助理",
+    "industry": "IT运维",
+    "summary": "适合 1-3 年运维或技术支持岗位，强调系统维护、故障处理和基础自动化能力。",
+    "skills": ["Linux", "脚本自动化", "系统巡检", "故障排查", "监控告警", "服务部署"],
+    "bullets": [
+      "围绕巡检、部署、监控和故障响应组织经历，突出稳定性与处理效率。",
+      "补充脚本化运维、文档沉淀和值班保障能力，让运维工作具备工程化表达。"
+    ],
+    "source_title": "两年经验系统维护助理简历模板 | 超级简历WonderCV",
+    "source_url": "https://www.wondercv.com/jianlimoban/8203e02761535b65.html",
+    "source_note": "根据中文运维/系统维护模板的公开要点匿名化整理。"
+  },
+  {
+    "id": "cn-qa-transfer-01",
+    "title": "中文测试工程师参考片段",
+    "role": "软件测试工程师",
+    "industry": "软件质量保障",
+    "summary": "强调测试策略、缺陷闭环和质量改进，也适合向数据或自动化方向转型。",
+    "skills": ["测试用例", "缺陷管理", "接口测试", "自动化测试", "质量分析", "回归测试"],
+    "bullets": [
+      "不要只写执行测试，要写清覆盖范围、风险识别、缺陷复现率和质量改进动作。",
+      "补充测试平台、自动化脚本或指标体系经验，体现从执行到质量治理的升级。"
+    ],
+    "source_title": "软件测试工程师转型简历模板 | 超级简历WonderCV",
+    "source_url": "https://www.wondercv.com/jianlimoban/c7389be96bc0dc3f.html",
+    "source_note": "结合中文测试工程师转型模板中的写法建议匿名化重构。"
+  },
+  {
+    "id": "cn-qa-performance-02",
+    "title": "中文性能测试参考片段",
+    "role": "性能测试工程师",
+    "industry": "测试 / 校招",
+    "summary": "适合应届或初级性能测试岗位，强调工具使用、指标分析和问题定位能力。",
+    "skills": ["JMeter", "性能测试", "压测分析", "接口监控", "问题定位", "基础脚本"],
+    "bullets": [
+      "突出压测方案设计、核心指标监测和瓶颈分析，不要只有工具名没有项目语境。",
+      "写清与研发协同定位问题、复测验证和结果沉淀的闭环。"
+    ],
+    "source_title": "性能测试工程师（适合应届生）简历模板 | 超级简历WonderCV",
+    "source_url": "https://www.wondercv.com/jianlimoban/h-BitUE.html",
+    "source_note": "依据中文性能测试模板的岗位重点进行匿名化整理。"
+  },
+  {
+    "id": "cn-bigdata-transfer-01",
+    "title": "中文大数据工程师参考片段",
+    "role": "大数据工程师",
+    "industry": "数据平台",
+    "summary": "强调离线链路、数仓分层和任务调度，也适合作为数据工程岗位的通用参考。",
+    "skills": ["Spark", "Hive", "Airflow", "ETL", "数据仓库", "SQL"],
+    "bullets": [
+      "围绕数据链路稳定性、时效、成本和数据质量写经历，让工程价值更清楚。",
+      "补充任务编排、分层建模和上下游协同，避免只写‘负责大数据开发’。"
+    ],
+    "source_title": "大数据工程师转型简历模板 | 超级简历WonderCV",
+    "source_url": "https://www.wondercv.com/jianlimoban/ce64d63e64e16619.html",
+    "source_note": "基于中文大数据工程师模板公开内容做匿名化重组。"
+  },
+  {
+    "id": "cn-algorithm-cv-01",
+    "title": "中文算法工程师参考片段",
+    "role": "深度学习图像算法工程师",
+    "industry": "AI应用",
+    "summary": "强调模型训练、推理部署和效果指标，适合计算机视觉或深度学习算法岗位。",
+    "skills": ["PyTorch", "计算机视觉", "模型训练", "模型评估", "推理优化", "数据处理"],
+    "bullets": [
+      "用精度、召回、推理时延、吞吐或成本等指标描述算法效果，避免笼统写‘负责模型开发’。",
+      "补充数据清洗、标注协同、实验对比和线上监控，让算法经历更完整。"
+    ],
+    "source_title": "深度学习图像算法工程师简历模板 | 超级简历WonderCV",
+    "source_url": "https://www.wondercv.com/jianlimoban/8Z6tOig.html",
+    "source_note": "根据中文算法工程师模板和公开示例进行匿名化提炼。"
+  },
+  {
+    "id": "cn-algorithm-general-02",
+    "title": "中文算法工程师参考片段 B",
+    "role": "算法工程师",
+    "industry": "推荐 / 机器学习",
+    "summary": "强调推荐、搜索或排序类算法成果表达，适合通用算法岗位。",
+    "skills": ["机器学习", "推荐系统", "特征工程", "离线评估", "在线实验", "模型优化"],
+    "bullets": [
+      "项目表述要从业务问题切入，再写模型方案、实验对比和最终线上指标改善。",
+      "将点击率、转化率、GMV 或召回率等业务指标与算法贡献直接绑定。"
+    ],
+    "source_title": "算法工程师简历模板：从菜鸟到专家的完整指南 | 超级简历WonderCV",
+    "source_url": "https://www.wondercv.com/blog/bcGIvyh9.html",
+    "source_note": "基于中文算法工程师简历指南中的公开案例和写作原则做匿名化重构。"
+  }
+]

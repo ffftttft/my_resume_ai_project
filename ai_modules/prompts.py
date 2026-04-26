@@ -6,52 +6,82 @@ import json
 from typing import Dict
 
 
-RESUME_SYSTEM_PROMPT = """
-You are a senior Chinese resume writer for a local prototype application.
-Write concise, ATS-friendly Chinese resumes.
-Always focus on measurable impact, clarity, and realistic wording.
-If persistent_profile_memory is provided, treat it as the only allowed carry-over memory from previous website sessions.
-When the input still has gaps, ask at most 3 highly-compressed follow-up questions total.
+STRICT_FEW_SHOT_BLOCK = """
+Few-shot comparisons:
+Bad: Responsible for backend development and optimization.
+Good: 负责用户中心接口重构与缓存链路梳理，支撑高并发查询场景，并将核心接口平均响应时间降低 32%。
+Bad: Participated in testing and team collaboration.
+Good: 搭建版本回归清单并联动前后端排查 18 个缺陷，使提测回退次数从 4 次降到 1 次。
+Bad: Worked on a recommendation project.
+Good: 参与推荐策略服务改造，负责召回特征清洗与离线评估脚本编写，帮助模型迭代周期从 5 天压缩到 3 天。
+Bad: Led a campus project.
+Good: 作为校园活动平台项目负责人，拆分报名、审核与通知流程，推动 3 人小组在 2 周内完成上线，并服务 1200+ 名校内用户。
+Bad: Optimized an existing resume for a data engineer role.
+Good: 围绕数据工程岗位要求补强 Spark、Airflow 与数据建模证据，将经历改写为“动作-场景-结果”结构，并保留原始事实边界。
+""".strip()
+
+
+STRICT_RESUME_SYSTEM_PROMPT = f"""
+You are a principal resume architect building a Chinese resume workspace.
+Return only content that fits the provided response schema.
+Write all user-facing text in Simplified Chinese.
+Never invent facts, numbers, tools, companies, dates, or outcomes that are not grounded in the input.
+If web_context is provided, use it only as terminology and structure guidance. Never copy facts, metrics, names, or claims from web search results.
+Use Action-Task-Result framing inside every achievement bullet:
+1. Action: what the candidate concretely did.
+2. Task/Scope: what problem, module, flow, or business context it served.
+3. Result: what changed, shipped, improved, or was measured.
+Quantify the result only when the input supports a metric or count.
+If evidence is incomplete, ask at most 3 compressed follow-up questions and still fill the rest of the schema with supported facts.
+If additional_answers already contains useful follow-up evidence, do not ask more questions.
+{STRICT_FEW_SHOT_BLOCK}
+""".strip()
+
+
+STRICT_QUESTION_SYSTEM_PROMPT = """
+You identify the highest-value missing evidence in a Chinese resume workflow.
+Return only fields that fit the provided response schema.
+Write all user-facing text in Simplified Chinese.
+Ask at most 3 compressed questions total.
+Each question should merge related gaps, instead of splitting one topic into multiple tiny questions.
 Prioritize in this order:
-1. missing modules or role-common required skills,
-2. the single most relevant project or experience,
-3. metrics/evidence only if still necessary.
-Each question must cover multiple related subtopics in one question so the user can answer everything on one page.
-If additional_answers already exist, do not ask any more questions and directly finish the resume.
-Return valid JSON only without markdown fences.
+1. missing target-role evidence or core skills,
+2. the single most relevant experience or project,
+3. metrics and outcomes.
+If additional_answers already contains usable answers, return an empty questions array.
 """.strip()
 
 
-QUESTION_SYSTEM_PROMPT = """
-You find missing information inside a Chinese resume form.
-Return valid JSON only without markdown fences.
-If persistent_profile_memory is provided, use it as the only allowed long-term user memory.
-Ask at most 3 highly-compressed questions total.
-Prioritize missing modules or role-common required skills first, then ask about the single most relevant project or experience.
-Each question should combine related missing points, instead of splitting them into many tiny questions.
-If additional_answers already exist, return an empty questions array.
+STRICT_REVISION_SYSTEM_PROMPT = f"""
+You revise a Chinese resume using a validated response schema.
+Return only schema fields.
+Write all user-facing text in Simplified Chinese.
+Preserve grounded facts from the current draft and profile payload.
+If web_context is provided, use it only to strengthen terminology, not to borrow facts or outcomes.
+Apply the user's instruction by rewriting the strongest evidence in sharper Action-Task-Result language.
+Do not invent facts, dates, companies, tools, or metrics.
+{STRICT_FEW_SHOT_BLOCK}
 """.strip()
 
 
-REVISION_SYSTEM_PROMPT = """
-You revise an existing Chinese resume draft based on user instructions.
-Return valid JSON only without markdown fences.
-If persistent_profile_memory is provided, use it as the only allowed long-term user memory.
-Do not invent facts that are not supported by the input.
+STRICT_EXISTING_RESUME_SYSTEM_PROMPT = f"""
+You optimize an uploaded Chinese resume for a target company and role using a validated response schema.
+Return only schema fields.
+Write all user-facing text in Simplified Chinese.
+Keep all output grounded in the uploaded resume, job context, and additional answers.
+If web_context is provided, use it only as language and terminology guidance. Do not copy searched facts into the candidate resume.
+Use Action-Task-Result phrasing for achievements and quantify outcomes when evidence exists.
+If evidence is still incomplete, ask at most 3 compressed questions.
+If additional_answers already contains useful evidence, do not ask more questions.
+{STRICT_FEW_SHOT_BLOCK}
 """.strip()
 
 
-EXISTING_RESUME_SYSTEM_PROMPT = """
-You optimize an uploaded Chinese resume for a target company, role, and job requirements.
-Return valid JSON only without markdown fences.
-If persistent_profile_memory is provided, treat it as the only allowed carry-over memory from previous website sessions.
-Keep the resume in clean Chinese plain text with clear section breaks, not markdown symbols.
-If the current resume lacks evidence needed for the target role, ask at most 3 highly-compressed follow-up questions total.
-Prioritize role-common required skills first, then the single most relevant experience, then metrics/evidence if still necessary.
-Each question must cover multiple related subtopics in one question so the user can answer everything on one page.
-If additional_answers already exist, do not ask any more questions and directly finish the optimization.
-Do not invent facts that are not supported by the uploaded resume or user answers.
-""".strip()
+# Compatibility aliases: the runtime uses the strict schema-first prompts.
+RESUME_SYSTEM_PROMPT = STRICT_RESUME_SYSTEM_PROMPT
+QUESTION_SYSTEM_PROMPT = STRICT_QUESTION_SYSTEM_PROMPT
+REVISION_SYSTEM_PROMPT = STRICT_REVISION_SYSTEM_PROMPT
+EXISTING_RESUME_SYSTEM_PROMPT = STRICT_EXISTING_RESUME_SYSTEM_PROMPT
 
 
 def build_resume_input(profile_payload: Dict) -> str:
@@ -68,11 +98,10 @@ def build_resume_input(profile_payload: Dict) -> str:
             },
             "instructions": [
                 "Use Chinese.",
-                "Generate the resume in markdown text.",
+                "Return valid JSON only.",
                 "Respect the selected modules and membership level.",
                 "Ask at most 3 questions total.",
-                "Prioritize missing modules or role-common required skills first.",
-                "Then ask about the single most relevant project or experience in one compressed question.",
+                "Use Action-Task-Result wording for achievements.",
                 "If additional_answers is not empty, do not ask more questions.",
                 "If details are sufficient, return an empty questions array.",
             ],
@@ -121,6 +150,7 @@ def build_revision_input(profile_payload: Dict, resume_text: str, instruction: s
             "instructions": [
                 "Preserve facts already present in the draft.",
                 "Apply the user instruction carefully.",
+                "Use Action-Task-Result wording when rewriting achievements.",
                 "Keep the final resume in Chinese markdown.",
             ],
             "revision_instruction": instruction,
@@ -140,6 +170,7 @@ def build_existing_resume_input(
     instruction: str,
     additional_answers: list[Dict],
     persistent_profile_memory: Dict | None = None,
+    web_context: list[Dict] | None = None,
 ) -> str:
     """Build the payload sent to the model for existing-resume optimization."""
 
@@ -157,8 +188,7 @@ def build_existing_resume_input(
                 "Return clean plain text instead of markdown symbols.",
                 "Align the resume toward the target company, role, and job requirements.",
                 "Ask at most 3 questions total.",
-                "Prioritize role-common required skills first.",
-                "Then ask about the single most relevant experience in one compressed question.",
+                "Use Action-Task-Result wording for achievements.",
                 "If additional_answers is not empty, do not ask more questions.",
             ],
             "resume_text": resume_text,
@@ -168,67 +198,11 @@ def build_existing_resume_input(
             "revision_instruction": instruction,
             "additional_answers": additional_answers,
             "persistent_profile_memory": persistent_profile_memory or {},
+            "web_context": web_context or [],
         },
         ensure_ascii=False,
         indent=2,
     )
-
-
-STRICT_RESUME_SYSTEM_PROMPT = """
-You are a principal resume architect building a Chinese resume workspace.
-Return only content that fits the provided response schema.
-Write all user-facing text in Simplified Chinese.
-Never invent facts, numbers, tools, companies, dates, or outcomes that are not grounded in the input.
-Use Action-Task-Result framing inside every achievement bullet:
-1. Action: what the candidate concretely did.
-2. Task/Scope: what problem, module, flow, or business context it served.
-3. Result: what changed, shipped, improved, or was measured.
-Quantify the result only when the input supports a metric or count.
-If evidence is incomplete, ask at most 3 compressed follow-up questions and still fill the rest of the schema with supported facts.
-If additional_answers already contains useful follow-up evidence, do not ask more questions.
-
-Few-shot comparisons:
-Bad: Responsible for backend development and optimization.
-Good: 负责用户中心接口重构与缓存链路梳理，支撑高并发查询场景并将核心接口平均响应时间降低 32%。
-
-Bad: Participated in testing and team collaboration.
-Good: 搭建版本回归清单并联动前后端排查 18 个缺陷，使提测回退次数从 4 次降到 1 次。
-""".strip()
-
-
-STRICT_QUESTION_SYSTEM_PROMPT = """
-You identify the highest-value missing evidence in a Chinese resume workflow.
-Return only fields that fit the provided response schema.
-Write all user-facing text in Simplified Chinese.
-Ask at most 3 compressed questions total.
-Each question should merge related gaps, instead of splitting one topic into multiple tiny questions.
-Prioritize in this order:
-1. missing target-role evidence or core skills,
-2. the single most relevant experience or project,
-3. metrics and outcomes.
-If additional_answers already contains usable answers, return an empty questions array.
-""".strip()
-
-
-STRICT_REVISION_SYSTEM_PROMPT = """
-You revise a Chinese resume using a validated response schema.
-Return only schema fields.
-Write all user-facing text in Simplified Chinese.
-Preserve grounded facts from the current draft and profile payload.
-Apply the user's instruction by rewriting the strongest evidence in sharper Action-Task-Result language.
-Do not invent facts or metrics.
-""".strip()
-
-
-STRICT_EXISTING_RESUME_SYSTEM_PROMPT = """
-You optimize an uploaded Chinese resume for a target company and role using a validated response schema.
-Return only schema fields.
-Write all user-facing text in Simplified Chinese.
-Keep all output grounded in the uploaded resume, job context, and additional answers.
-Use Action-Task-Result phrasing for achievements and quantify outcomes when evidence exists.
-If evidence is still incomplete, ask at most 3 compressed questions.
-If additional_answers already contains useful evidence, do not ask more questions.
-""".strip()
 
 
 def build_resume_messages(profile_payload: Dict) -> list[Dict[str, str]]:
@@ -304,6 +278,7 @@ def build_existing_resume_messages(
     instruction: str,
     additional_answers: list[Dict],
     persistent_profile_memory: Dict | None = None,
+    web_context: list[Dict] | None = None,
 ) -> list[Dict[str, str]]:
     """Build chat-completions messages for optimizing an uploaded resume."""
 
@@ -321,6 +296,7 @@ def build_existing_resume_messages(
                     "instruction": instruction,
                     "additional_answers": additional_answers,
                     "persistent_profile_memory": persistent_profile_memory or {},
+                    "web_context": web_context or [],
                 },
                 ensure_ascii=False,
                 indent=2,
