@@ -39,6 +39,8 @@ resume_docx_template_service = ResumeDocxTemplateService(
     preview_dir=settings.generated_resume_file_preview_dir,
     avatar_dir=settings.generated_resume_image_dir.parent / "avatars",
     project_root=settings.project_root,
+    soffice_path=settings.soffice_path,
+    preview_dpi=settings.docx_preview_dpi,
 )
 umi_ocr_service = UmiOcrService(
     base_url=settings.umi_ocr_base_url,

@@ -19,6 +19,32 @@ const IMAGE_MODELS = [
   { value: "gpt-image-2pro", label: "Image2 Pro", meta: "2K A4" },
 ];
 
+const FILE_PROGRESS_STEPS = [
+  "整理事实",
+  "选择入版内容",
+  "填充 DOCX 模板",
+  "本地版式审查",
+  "渲染图片预览",
+  "生成完成",
+];
+
+function ReportList({ title, items = [], tone = "neutral" }) {
+  const visibleItems = items.filter(Boolean).slice(0, 5);
+  if (visibleItems.length === 0) return null;
+  return (
+    <div className={`resume-file-page__report-block is-${tone}`}>
+      <p>{title}</p>
+      <ul>
+        {visibleItems.map((item) => (
+          <li key={typeof item === "string" ? item : JSON.stringify(item)}>
+            {typeof item === "string" ? item : item.title || item.label || JSON.stringify(item)}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export default function ResumeImagePanel({
   boardLabel,
   templates = [],
@@ -47,15 +73,25 @@ export default function ResumeImagePanel({
   const result = imageState?.result;
   const wordResult = imageState?.word_result;
   const imageTestResult = imageState?.image_test_result;
+  const layoutReport = result?.layout_report || {};
+  const previewReport = layoutReport.preview || {};
   const isGenerating = imageState?.status === "generating" || loading;
   const isImageTesting = imageState?.image_test_status === "generating" || imageTestLoading;
   const isSaving = savingImage || savingWord;
-  const [previewKind, setPreviewKind] = useState(result?.preview_url ? "result" : "template");
   const [lightboxImage, setLightboxImage] = useState(null);
+  const [progressIndex, setProgressIndex] = useState(0);
 
   useEffect(() => {
-    setPreviewKind(result?.preview_url ? "result" : "template");
-  }, [selectedTemplate?.id, result?.preview_url]);
+    if (!isGenerating) {
+      setProgressIndex(result ? FILE_PROGRESS_STEPS.length - 1 : 0);
+      return undefined;
+    }
+    setProgressIndex(0);
+    const timer = window.setInterval(() => {
+      setProgressIndex((previous) => Math.min(previous + 1, FILE_PROGRESS_STEPS.length - 2));
+    }, 520);
+    return () => window.clearInterval(timer);
+  }, [isGenerating, result?.file_name]);
 
   useEffect(() => {
     if (!lightboxImage) return undefined;
@@ -68,33 +104,30 @@ export default function ResumeImagePanel({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [lightboxImage]);
 
-  const previewImage =
-    previewKind === "result" && result?.preview_url
-      ? {
-          src: result.preview_url,
-          alt: "生成的简历文件预览",
-          label: "文件预览",
-          meta: `${result.template_name || "DOCX 模板"} · ${result.file_name || "Word 已生成"}`,
-        }
-      : previewKind === "image_test" && imageTestResult?.preview_url
-        ? {
-            src: imageTestResult.preview_url,
-            alt: "AI 生图测试结果",
-            label: "AI 生图测试",
-            meta: `${imageTestResult.model_label || imageTestResult.model || "Image2"} · ${
-              imageTestResult.size || "A4"
-            } · ${imageTestResult.latency_ms || "-"} ms`,
-          }
-        : selectedTemplate?.preview_url
-          ? {
-              src: selectedTemplate.preview_url,
-              alt: selectedTemplate.name,
-              label: "模板预览",
-              meta: selectedTemplate.description || "点击预览图可放大查看模板细节。",
-            }
-          : null;
+  const generatedPreview = result?.preview_url
+    ? {
+        src: result.preview_url,
+        alt: "生成的 Word 图片预览",
+        label: "Word 预览",
+        meta: `${result.template_name || "DOCX 模板"} · ${result.file_name || "Word 已生成"}`,
+      }
+    : null;
 
-  const layoutNotes = result?.layout_report?.overflow_notes || [];
+  const templatePreview = selectedTemplate?.preview_url
+    ? {
+        src: selectedTemplate.preview_url,
+        alt: selectedTemplate.name,
+        label: "模板预览",
+        meta: selectedTemplate.description || "点击模板卡片可放大查看。",
+      }
+    : null;
+
+  const mainPreview = generatedPreview || templatePreview;
+  const fixedIssues = layoutReport.fixed_issues || [];
+  const warnings = layoutReport.warnings || [];
+  const overflowNotes = layoutReport.overflow_notes || [];
+  const selectedRecords = layoutReport.selected_records || [];
+  const omittedRecords = layoutReport.omitted_records || [];
 
   return (
     <main className="resume-image-page resume-file-page">
@@ -103,7 +136,7 @@ export default function ResumeImagePanel({
           <p className="resume-image-page__eyebrow">{boardLabel} · Resume Files</p>
           <h2 className="resume-image-page__title">简历文件生成</h2>
           <p className="resume-image-page__copy">
-            优先使用 DOCX 模板替换内容，保留模板字体、字号、头像位置和整体版式；图片仅作为浏览器预览。
+            主流程使用 DOCX 模板替换内容，优先保证中文清晰、事实准确和版式稳定。图片仅作为浏览器预览。
           </p>
         </div>
 
@@ -133,7 +166,13 @@ export default function ResumeImagePanel({
                     key={template.id}
                     onClick={() => {
                       onSelectTemplate(template.id);
-                      setPreviewKind("template");
+                      if (template.preview_url) {
+                        setLightboxImage({
+                          src: template.preview_url,
+                          alt: template.name,
+                          label: "模板预览",
+                        });
+                      }
                     }}
                     className={`resume-image-page__template ${isSelected ? "is-selected" : ""}`}
                   >
@@ -166,7 +205,7 @@ export default function ResumeImagePanel({
             </div>
             <div>
               <UserRound size={16} />
-              <span>{avatar?.preview_url ? "头像会替换模板照片" : "头像可选"}</span>
+              <span>{avatar?.preview_url ? "头像将替换模板照片" : "头像可选"}</span>
             </div>
           </div>
 
@@ -187,61 +226,76 @@ export default function ResumeImagePanel({
           <div className="resume-image-page__panel-head">
             <div>
               <p className="resume-image-page__section-kicker">Preview</p>
-              <h3>{previewImage?.label || "A4 预览"}</h3>
+              <h3>{generatedPreview ? "生成结果预览" : "模板预览"}</h3>
             </div>
-            <div className="resume-image-page__preview-tabs" role="tablist" aria-label="预览内容">
+            {generatedPreview ? (
               <button
                 type="button"
-                onClick={() => setPreviewKind("template")}
-                className={previewKind === "template" ? "is-active" : ""}
+                className="resume-file-page__ghost-action"
+                onClick={() => setLightboxImage(generatedPreview)}
               >
-                模板
+                <Maximize2 size={15} />
+                放大查看
               </button>
-              <button
-                type="button"
-                onClick={() => setPreviewKind("result")}
-                disabled={!result?.preview_url}
-                className={previewKind === "result" ? "is-active" : ""}
-              >
-                文件
-              </button>
-              <button
-                type="button"
-                onClick={() => setPreviewKind("image_test")}
-                disabled={!imageTestResult?.preview_url}
-                className={previewKind === "image_test" ? "is-active" : ""}
-              >
-                测试
-              </button>
-            </div>
+            ) : null}
           </div>
 
-          <div className="resume-image-page__a4-stage">
-            {previewImage?.src ? (
-              <button
-                type="button"
-                className="resume-image-page__a4-frame resume-image-page__a4-frame--clickable"
-                onClick={() => setLightboxImage(previewImage)}
-                title="点击放大查看"
-              >
-                <img src={previewImage.src} alt={previewImage.alt} />
-                <span className="resume-image-page__zoom-hint">
-                  <Maximize2 size={14} />
-                  放大查看
-                </span>
-              </button>
-            ) : (
-              <div className="resume-image-page__a4-frame">
-                <div className="resume-image-page__a4-placeholder">
-                  <Image size={34} />
-                  <p>选择模板后在这里查看大图</p>
-                </div>
+          {isGenerating ? (
+            <div className="resume-file-page__progress">
+              <div className="resume-file-page__progress-orbit">
+                <Sparkles size={28} />
               </div>
-            )}
-          </div>
+              <div className="resume-file-page__progress-steps">
+                {FILE_PROGRESS_STEPS.map((step, index) => (
+                  <span
+                    key={step}
+                    className={
+                      index < progressIndex
+                        ? "is-done"
+                        : index === progressIndex
+                          ? "is-active"
+                          : ""
+                    }
+                  >
+                    {step}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="resume-image-page__a4-stage resume-file-page__a4-stage">
+              {mainPreview?.src ? (
+                <button
+                  type="button"
+                  className="resume-image-page__a4-frame resume-image-page__a4-frame--clickable"
+                  onClick={() => setLightboxImage(mainPreview)}
+                  title="点击放大查看"
+                >
+                  <img src={mainPreview.src} alt={mainPreview.alt} />
+                  <span className="resume-image-page__zoom-hint">
+                    <Maximize2 size={14} />
+                    放大查看
+                  </span>
+                </button>
+              ) : result ? (
+                <div className="resume-image-page__a4-frame resume-file-page__preview-missing">
+                  <FileText size={36} />
+                  <p>Word 已生成，但当前环境没有生成图片预览。</p>
+                  <span>{previewReport.message || "可先保存 Word；配置 Word 或 LibreOffice 后会显示预览图。"}</span>
+                </div>
+              ) : (
+                <div className="resume-image-page__a4-frame">
+                  <div className="resume-image-page__a4-placeholder">
+                    <Image size={34} />
+                    <p>选择模板后在这里查看 A4 预览</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           <p className="resume-image-page__preview-meta">
-            {previewImage?.meta || "模板、文件预览和 AI 测试结果都会保持 A4 竖版比例预览。"}
+            {generatedPreview?.meta || templatePreview?.meta || "生成后这里会显示 Word 文件渲染出的高清图片。"}
           </p>
         </div>
 
@@ -258,8 +312,8 @@ export default function ResumeImagePanel({
             <p>{result?.saved_name ? "DOCX 模板结果已就绪" : "先生成 Word 和预览图"}</p>
             <span>
               {wordResult?.saved_name
-                ? `Word 已生成：${wordResult.file_name || wordResult.saved_name}`
-                : "生成后可保存 Word，也可以保存当前图片预览。"}
+                ? `Word：${wordResult.file_name || wordResult.saved_name}`
+                : "生成后可保存 Word；如果本机渲染器可用，也可保存图片预览。"}
             </span>
           </div>
 
@@ -275,12 +329,18 @@ export default function ResumeImagePanel({
           </div>
 
           <div className="resume-file-page__report">
-            <p>版式检查</p>
-            <ul>
-              <li>保持模板字体、字号、颜色和段落对象。</li>
-              <li>每段经历按模板槽位优先放入 3 条要点。</li>
-              {layoutNotes.length > 0 ? layoutNotes.slice(0, 3).map((note) => <li key={note}>{note}</li>) : null}
-            </ul>
+            <div className="resume-file-page__report-head">
+              <p>版式检查</p>
+              <span className={warnings.length > 0 ? "is-warning" : "is-ok"}>
+                {warnings.length > 0 ? "需检查" : result ? "通过" : "待生成"}
+              </span>
+            </div>
+            <ReportList title="已处理" items={fixedIssues} tone="ok" />
+            <ReportList title="需要注意" items={warnings} tone="warning" />
+            <ReportList title="容量提示" items={overflowNotes} />
+            <ReportList title="已入版内容" items={selectedRecords} />
+            <ReportList title="未入版内容" items={omittedRecords} tone="muted" />
+            {previewReport.message ? <p className="resume-file-page__preview-note">{previewReport.message}</p> : null}
           </div>
 
           <details className="resume-file-page__test-box">
@@ -308,6 +368,23 @@ export default function ResumeImagePanel({
 
             {imageState?.image_test_error ? (
               <p className="resume-image-page__error">{imageState.image_test_error}</p>
+            ) : null}
+
+            {imageTestResult?.preview_url ? (
+              <button
+                type="button"
+                className="resume-file-page__test-preview"
+                onClick={() =>
+                  setLightboxImage({
+                    src: imageTestResult.preview_url,
+                    alt: "AI 生图测试结果",
+                    label: "AI 生图测试",
+                  })
+                }
+              >
+                <Image size={16} />
+                查看测试结果
+              </button>
             ) : null}
 
             <button

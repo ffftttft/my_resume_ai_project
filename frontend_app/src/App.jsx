@@ -57,6 +57,9 @@ function createEmptyEducation() {
     degree: "",
     major: "",
     duration: "",
+    gpa: "",
+    ranking: "",
+    courses_text: "",
     highlights_text: "",
   };
 }
@@ -67,6 +70,8 @@ function createEmptyProject() {
     role: "",
     duration: "",
     description: "",
+    tools_text: "",
+    project_url: "",
     highlights_text: "",
     attachment_name: "",
     attachment_context: "",
@@ -81,6 +86,10 @@ function createEmptyExperience() {
     company: "",
     role: "",
     duration: "",
+    department: "",
+    location: "",
+    summary: "",
+    tools_text: "",
     highlights_text: "",
     attachment_name: "",
     attachment_context: "",
@@ -278,6 +287,8 @@ const INITIAL_GREENFIELD_FORM_STATE = {
   basic_info: {
     name: "",
     birth_date: "",
+    gender: "",
+    political_status: "",
     target_company: "",
     target_role: "",
     job_requirements: "",
@@ -436,6 +447,9 @@ function toEducationPayload(items) {
         major: item.major.trim(),
         start_date,
         end_date,
+        gpa: (item.gpa || "").trim(),
+        ranking: (item.ranking || "").trim(),
+        courses: splitTextList(item.courses_text),
         highlights: splitTextList(item.highlights_text),
       };
     });
@@ -452,6 +466,8 @@ function toProjectPayload(items) {
         start_date,
         end_date,
         description: item.description.trim(),
+        tools: splitTextList(item.tools_text),
+        project_url: (item.project_url || "").trim(),
         highlights: splitTextList(item.highlights_text),
         attachment_name: item.attachment_name || "",
         attachment_context: item.attachment_context || "",
@@ -467,8 +483,12 @@ function toExperiencePayload(items) {
       return {
         company: item.company.trim(),
         role: item.role.trim(),
+        department: (item.department || "").trim(),
+        location: (item.location || "").trim(),
         start_date,
         end_date,
+        summary: (item.summary || "").trim(),
+        tools: splitTextList(item.tools_text),
         highlights: splitTextList(item.highlights_text),
         attachment_name: item.attachment_name || "",
         attachment_context: item.attachment_context || "",
@@ -500,6 +520,8 @@ function buildProfilePayload(formState) {
     basic_info: {
       name: formState.basic_info.name.trim(),
       birth_date: (formState.basic_info.birth_date || "").trim(),
+      gender: (formState.basic_info.gender || "").trim(),
+      political_status: (formState.basic_info.political_status || "").trim(),
       target_company: formState.basic_info.target_company.trim(),
       target_role: formState.basic_info.target_role.trim(),
       job_requirements: formState.basic_info.job_requirements.trim(),
@@ -559,6 +581,8 @@ function buildStructuredResumeFromGreenfieldForm(formState = {}) {
     contact: {
       full_name: profile.basic_info.name,
       birth_date: profile.basic_info.birth_date,
+      gender: profile.basic_info.gender,
+      political_status: profile.basic_info.political_status,
       email: profile.basic_info.email,
       phone: profile.basic_info.phone,
       city: profile.basic_info.city,
@@ -571,14 +595,21 @@ function buildStructuredResumeFromGreenfieldForm(formState = {}) {
       major: item.major,
       start_date: item.start_date,
       end_date: item.end_date,
+      gpa: item.gpa,
+      ranking: item.ranking,
+      courses: item.courses,
       highlights: item.highlights,
     })),
     experience: profile.experiences.map((item) => ({
       company_name: item.company,
       job_title: item.role,
+      department: item.department,
+      location: item.location,
       start_date: item.start_date,
       end_date: item.end_date,
+      summary: item.summary,
       achievements: item.highlights,
+      tools: item.tools,
     })),
     projects: profile.projects.map((item) => ({
       project_name: item.name,
@@ -587,6 +618,8 @@ function buildStructuredResumeFromGreenfieldForm(formState = {}) {
       end_date: item.end_date,
       project_summary: item.description,
       achievements: item.highlights,
+      tools: item.tools,
+      project_url: item.project_url,
     })),
     awards: profile.awards,
     skills: profile.skills.length > 0 ? [{ category: "技能", items: profile.skills }] : [],
@@ -1352,7 +1385,10 @@ export default function App() {
     return {
       ...createEmptyResumeImageState(),
       ...clonePlainObject(value, createEmptyResumeImageState()),
-      status: value.result?.preview_url ? value.status || "done" : value.status || "idle",
+      status:
+        value.result?.saved_name || value.result?.preview_url || value.word_result?.saved_name
+          ? value.status || "done"
+          : value.status || "idle",
       error: value.error || "",
     };
   }
@@ -1362,7 +1398,11 @@ export default function App() {
     const jobInfo = overrides.jobInfo || getJobInfoForBoard(board);
     const imageStateForBoard =
       overrides.imageState || resumeImageState[board] || createEmptyResumeImageState();
-    const hasImageResult = Boolean(imageStateForBoard?.result?.preview_url);
+    const hasImageResult = Boolean(
+      imageStateForBoard?.result?.saved_name ||
+        imageStateForBoard?.result?.preview_url ||
+        imageStateForBoard?.word_result?.saved_name,
+    );
 
     return {
       title: workspace.title || buildResumeSnapshotTitle(jobInfo.target_company, jobInfo.target_role),
@@ -1396,7 +1436,9 @@ export default function App() {
         buildSnapshotPayload(board, {
           imageState: imageStateOverride || resumeImageState[board] || createEmptyResumeImageState(),
           resumeImagePageOpen: Boolean(
-            (imageStateOverride || resumeImageState[board])?.result?.preview_url,
+            (imageStateOverride || resumeImageState[board])?.result?.saved_name ||
+              (imageStateOverride || resumeImageState[board])?.result?.preview_url ||
+              (imageStateOverride || resumeImageState[board])?.word_result?.saved_name,
           ),
         }),
       );
@@ -1719,13 +1761,17 @@ export default function App() {
       : activeWorkspace.resume_text.trim();
     const jobDescription = [
       activeJobInfo?.target_role,
-      activeJobInfo?.target_company,
       activeJobInfo?.job_requirements,
     ]
       .map((value) => value?.trim?.() || "")
       .filter(Boolean)
       .join("\n")
       .trim();
+
+    const atsStreaming = liveStreamState.board === activeBoard && liveStreamState.active;
+    if (atsStreaming) {
+      return undefined;
+    }
 
     if (backendStatus?.status !== "ok" || !resumeText || !jobDescription) {
       setSemanticAtsState({
@@ -1773,6 +1819,8 @@ export default function App() {
   }, [
     activeBoard,
     backendStatus?.status,
+    liveStreamState.active,
+    liveStreamState.board,
     activeWorkspace.resume_text,
     activeJobInfo?.target_company,
     activeJobInfo?.target_role,
@@ -2972,7 +3020,25 @@ export default function App() {
       ...previous,
       [restoredBoard]: restoredImageState,
     }));
-    setResumeImagePageOpen(Boolean(restoredImageState.result?.preview_url || snapshot?.resume_image_page_open));
+    if (restoredStructuredResume) {
+      setLiveStreamState({
+        ...createEmptyLiveStreamState(),
+        board: restoredBoard,
+        status: "已从历史记录恢复结构化结果",
+        partial_result: {
+          structured_resume: restoredStructuredResume,
+          contract_report: restoredWorkspace.contract_report,
+        },
+      });
+    }
+    setResumeImagePageOpen(
+      Boolean(
+        restoredImageState.result?.saved_name ||
+          restoredImageState.result?.preview_url ||
+          restoredImageState.word_result?.saved_name ||
+          snapshot?.resume_image_page_open,
+      ),
+    );
 
     const restoredAt = snapshot?.timestamp ? new Date(snapshot.timestamp).toLocaleString() : "历史记录";
     const imageCopy = restoredImageState.result?.preview_url ? "，图片结果已恢复" : "";
@@ -3519,7 +3585,6 @@ export default function App() {
     : activeResumeSeedText;
   const activeAtsJobDescription = [
     activeJobInfo?.target_role,
-    activeJobInfo?.target_company,
     activeJobInfo?.job_requirements,
   ]
     .map((value) => value?.trim?.() || "")
@@ -3545,14 +3610,16 @@ export default function App() {
           }
         : null;
   const localAtsResult =
-    activeAtsResumeData && hasAtsJobDescription && activeAtsJobDescription.trim()
+    !isActiveBoardStreaming && activeAtsResumeData && hasAtsJobDescription && activeAtsJobDescription.trim()
       ? calculateATSScore(activeAtsResumeData, activeAtsJobDescription)
       : null;
   const shouldWaitForBackendAts =
     backendStatus?.status === "ok" &&
     Boolean(activeAtsResumeData) &&
     Boolean(hasAtsJobDescription && activeAtsJobDescription.trim());
-  const activeAtsResult = shouldWaitForBackendAts
+  const activeAtsResult = isActiveBoardStreaming
+    ? semanticAtsState.result || null
+    : shouldWaitForBackendAts
     ? semanticAtsState.result || (semanticAtsState.status === "fallback" ? localAtsResult : null)
     : localAtsResult;
   const activeAtsMeta = activeAtsResult

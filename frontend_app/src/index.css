@@ -7214,6 +7214,117 @@ input.rounded-xl:focus {
   opacity: 0.38;
 }
 
+.resume-file-page__ghost-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #dbe3ef;
+  border-radius: 999px;
+  background: #fff;
+  color: #173f72;
+  font-size: 0.78rem;
+  font-weight: 900;
+  padding: 8px 12px;
+}
+
+.resume-file-page__a4-stage {
+  min-height: 0;
+  padding: 0;
+}
+
+.resume-file-page__preview .resume-image-page__a4-frame {
+  width: min(100%, 720px);
+  max-height: calc(100vh - 230px);
+}
+
+.resume-file-page__preview-missing {
+  align-content: center;
+  gap: 10px;
+  padding: 28px;
+  color: #475569;
+  text-align: center;
+}
+
+.resume-file-page__preview-missing p {
+  margin: 0;
+  color: #0f172a;
+  font-size: 0.95rem;
+  font-weight: 900;
+}
+
+.resume-file-page__preview-missing span {
+  max-width: 360px;
+  color: #64748b;
+  font-size: 0.82rem;
+  line-height: 1.7;
+}
+
+.resume-file-page__progress {
+  display: grid;
+  min-height: 600px;
+  place-items: center;
+  gap: 24px;
+}
+
+.resume-file-page__progress-orbit {
+  position: relative;
+  display: grid;
+  width: 92px;
+  height: 92px;
+  place-items: center;
+  border-radius: 50%;
+  background: #eef4ff;
+  color: #3155d4;
+  box-shadow: 0 20px 50px rgba(49, 85, 212, 0.22);
+}
+
+.resume-file-page__progress-orbit::before {
+  position: absolute;
+  inset: -8px;
+  border: 2px solid rgba(49, 85, 212, 0.18);
+  border-top-color: #3155d4;
+  border-radius: inherit;
+  animation: resume-file-orbit 1.2s linear infinite;
+  content: "";
+}
+
+@keyframes resume-file-orbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.resume-file-page__progress-steps {
+  display: grid;
+  width: min(100%, 420px);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.resume-file-page__progress-steps span {
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  background: #fff;
+  color: #94a3b8;
+  font-size: 0.78rem;
+  font-weight: 900;
+  padding: 9px 12px;
+  text-align: center;
+}
+
+.resume-file-page__progress-steps span.is-active {
+  border-color: #3155d4;
+  background: #eef4ff;
+  color: #173f72;
+  box-shadow: 0 10px 24px rgba(49, 85, 212, 0.15);
+}
+
+.resume-file-page__progress-steps span.is-done {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #166534;
+}
+
 .resume-file-page__save-card,
 .resume-file-page__report,
 .resume-file-page__test-box {
@@ -7285,12 +7396,70 @@ input.rounded-xl:focus {
   margin-top: 16px;
 }
 
+.resume-file-page__report-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.resume-file-page__report-head p {
+  margin: 0;
+}
+
+.resume-file-page__report-head span {
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 900;
+  padding: 5px 9px;
+}
+
+.resume-file-page__report-head span.is-ok {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.resume-file-page__report-head span.is-warning {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.resume-file-page__report-block {
+  margin-top: 12px;
+  border-top: 1px solid #e2e8f0;
+  padding-top: 10px;
+}
+
+.resume-file-page__report-block p {
+  color: #173f72;
+  font-size: 0.76rem;
+}
+
+.resume-file-page__report-block.is-warning p {
+  color: #92400e;
+}
+
+.resume-file-page__report-block.is-muted p {
+  color: #64748b;
+}
+
 .resume-file-page__report ul {
   margin: 10px 0 0;
   padding-left: 1rem;
   color: #475569;
   font-size: 0.78rem;
   line-height: 1.7;
+}
+
+.resume-file-page__preview-note {
+  margin: 12px 0 0;
+  border-radius: 12px;
+  background: #eef4ff;
+  color: #3155d4;
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1.6;
+  padding: 10px 12px;
 }
 
 .resume-file-page__test-box {
@@ -7315,6 +7484,22 @@ input.rounded-xl:focus {
   width: 100%;
   margin-top: 12px;
   background: #92400e;
+}
+
+.resume-file-page__test-preview {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 12px;
+  border: 1px solid #fed7aa;
+  border-radius: 999px;
+  background: #fff7ed;
+  color: #92400e;
+  font-size: 0.82rem;
+  font-weight: 900;
+  padding: 10px 12px;
 }
 
 @media (max-width: 1280px) {

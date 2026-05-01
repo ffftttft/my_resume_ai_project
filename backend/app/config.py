@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     generated_resume_image_dir: Path = project_root / "backend" / "generated" / "resume_images"
     generated_resume_file_dir: Path = project_root / "backend" / "generated" / "resume_files"
     generated_resume_file_preview_dir: Path = project_root / "backend" / "generated" / "resume_file_previews"
+    soffice_path: str = ""
+    docx_preview_dpi: int = 180
     umi_ocr_base_url: str = "http://127.0.0.1:1224"
     umi_ocr_exe_path: Path = project_root / ".local_tools" / "umi-ocr" / "runtime" / "Umi-OCR.exe"
     umi_ocr_auto_start: bool = True

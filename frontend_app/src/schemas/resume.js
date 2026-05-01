@@ -6,6 +6,8 @@ const stringListField = z.array(z.string());
 const REQUEST_FIELD_LABELS = {
   "profile.basic_info.name": "姓名",
   "profile.basic_info.birth_date": "出生日期",
+  "profile.basic_info.gender": "性别",
+  "profile.basic_info.political_status": "政治面貌",
   "profile.basic_info.target_company": "目标公司",
   "profile.basic_info.target_role": "目标岗位",
   "profile.basic_info.job_requirements": "岗位要求",
@@ -55,6 +57,9 @@ function parseWithReadableError(schema, payload) {
 export const contactSchema = z
   .object({
     full_name: stringField,
+    birth_date: z.string().default(""),
+    gender: z.string().default(""),
+    political_status: z.string().default(""),
     email: stringField,
     phone: stringField,
     city: stringField,
@@ -74,9 +79,12 @@ export const experienceRecordSchema = z
   .object({
     company_name: stringField,
     job_title: stringField,
+    department: z.string().default(""),
+    location: z.string().default(""),
     start_date: stringField,
     end_date: stringField,
-    role_scope: stringField,
+    role_scope: z.string().default(""),
+    summary: z.string().default(""),
     achievements: stringListField,
     tools: stringListField,
   })
@@ -91,6 +99,7 @@ export const projectRecordSchema = z
     project_summary: stringField,
     achievements: stringListField,
     tools: stringListField,
+    project_url: z.string().default(""),
   })
   .strict();
 
@@ -111,6 +120,9 @@ export const educationRecordSchema = z
     major: stringField,
     start_date: stringField,
     end_date: stringField,
+    gpa: z.string().default(""),
+    ranking: z.string().default(""),
+    courses: stringListField.default([]),
     highlights: stringListField,
   })
   .strict();
@@ -405,6 +417,8 @@ export const basicInfoRequestSchema = z
   .object({
     name: stringField,
     birth_date: z.string().default(""),
+    gender: z.string().default(""),
+    political_status: z.string().default(""),
     target_company: z.string().default(""),
     target_role: z.string().default(""),
     job_requirements: z.string().default(""),
@@ -422,6 +436,9 @@ export const educationItemRequestSchema = z
     major: stringField,
     start_date: stringField,
     end_date: stringField,
+    gpa: z.string().default(""),
+    ranking: z.string().default(""),
+    courses: stringListField.default([]),
     highlights: stringListField,
   })
   .strict();
@@ -430,8 +447,12 @@ export const experienceItemRequestSchema = z
   .object({
     company: stringField,
     role: stringField,
+    department: z.string().default(""),
+    location: z.string().default(""),
     start_date: stringField,
     end_date: stringField,
+    summary: z.string().default(""),
+    tools: stringListField.default([]),
     highlights: stringListField,
     attachment_name: stringField,
     attachment_context: stringField,
@@ -445,6 +466,8 @@ export const projectItemRequestSchema = z
     start_date: stringField,
     end_date: stringField,
     description: stringField,
+    tools: stringListField.default([]),
+    project_url: z.string().default(""),
     highlights: stringListField,
     attachment_name: stringField,
     attachment_context: stringField,

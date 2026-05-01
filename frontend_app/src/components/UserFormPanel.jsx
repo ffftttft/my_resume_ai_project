@@ -319,6 +319,12 @@ export default function UserFormPanel({
           <Field label="城市">
             <TextInput name="city" value={formState.basic_info.city} onChange={(value) => onBasicInfoChange("city", value)} placeholder="上海 / 杭州 / 深圳" />
           </Field>
+          <Field label="性别">
+            <TextInput name="gender" value={formState.basic_info.gender || ""} onChange={(value) => onBasicInfoChange("gender", value)} placeholder="男 / 女 / 可不填" />
+          </Field>
+          <Field label="政治面貌">
+            <TextInput name="political_status" value={formState.basic_info.political_status || ""} onChange={(value) => onBasicInfoChange("political_status", value)} placeholder="中共党员 / 共青团员 / 群众" />
+          </Field>
           <Field label="邮箱">
             <TextInput name="email" value={formState.basic_info.email} onChange={(value) => onBasicInfoChange("email", value)} placeholder="zhangsan@example.com" />
           </Field>
@@ -396,6 +402,12 @@ export default function UserFormPanel({
               <Field label="专业">
                 <TextInput value={item.major} onChange={(value) => onListItemChange("education", index, "major", value)} placeholder="软件工程" />
               </Field>
+              <Field label="GPA">
+                <TextInput value={item.gpa || ""} onChange={(value) => onListItemChange("education", index, "gpa", value)} placeholder="3.25/5.00" />
+              </Field>
+              <Field label="专业排名">
+                <TextInput value={item.ranking || ""} onChange={(value) => onListItemChange("education", index, "ranking", value)} placeholder="前 20% / 12/80" />
+              </Field>
             </div>
             <TimelineFields
               item={item}
@@ -407,6 +419,14 @@ export default function UserFormPanel({
               allowPresentEnd
               onChange={(field, value) => onListItemChange("education", index, field, value)}
             />
+            <Field label="主修课程">
+              <TextArea
+                value={item.courses_text || ""}
+                onChange={(value) => onListItemChange("education", index, "courses_text", value)}
+                placeholder={"数据结构\n数据库系统\n统计学"}
+                rows={3}
+              />
+            </Field>
             <Field label="亮点">
               <TextArea
                 value={item.highlights_text}
@@ -457,6 +477,14 @@ export default function UserFormPanel({
             <Field label="项目描述">
               <TextArea value={item.description} onChange={(value) => onListItemChange("projects", index, "description", value)} placeholder="简述项目目标、场景和你的核心任务。" rows={3} />
             </Field>
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field label="技术栈">
+                <TextArea value={item.tools_text || ""} onChange={(value) => onListItemChange("projects", index, "tools_text", value)} placeholder={"Python\nSQL\nScikit-learn"} rows={3} />
+              </Field>
+              <Field label="项目链接">
+                <TextInput value={item.project_url || ""} onChange={(value) => onListItemChange("projects", index, "project_url", value)} placeholder="GitHub / 作品集 / 可不填" />
+              </Field>
+            </div>
             <Field label="项目亮点">
               <TextArea value={item.highlights_text} onChange={(value) => onListItemChange("projects", index, "highlights_text", value)} placeholder={"使用 FastAPI + React 开发\n接口响应时间降低 30%"} rows={4} />
             </Field>
@@ -490,6 +518,12 @@ export default function UserFormPanel({
               <Field label="岗位">
                 <TextInput value={item.role} onChange={(value) => onListItemChange("experiences", index, "role", value)} placeholder="后端开发实习生" />
               </Field>
+              <Field label="部门">
+                <TextInput value={item.department || ""} onChange={(value) => onListItemChange("experiences", index, "department", value)} placeholder="数据平台部 / 可不填" />
+              </Field>
+              <Field label="地点">
+                <TextInput value={item.location || ""} onChange={(value) => onListItemChange("experiences", index, "location", value)} placeholder="上海 / 杭州 / 远程" />
+              </Field>
             </div>
             <TimelineFields
               item={item}
@@ -500,6 +534,12 @@ export default function UserFormPanel({
               allowPresentEnd
               onChange={(field, value) => onListItemChange("experiences", index, field, value)}
             />
+            <Field label="职责范围">
+              <TextArea value={item.summary || ""} onChange={(value) => onListItemChange("experiences", index, "summary", value)} placeholder="一句话说明你负责的业务、模块或协作范围。" rows={3} />
+            </Field>
+            <Field label="工具 / 技术栈">
+              <TextArea value={item.tools_text || ""} onChange={(value) => onListItemChange("experiences", index, "tools_text", value)} placeholder={"Flutter\n鸿蒙 SDK\nSQL"} rows={3} />
+            </Field>
             <Field label="经历亮点">
               <TextArea value={item.highlights_text} onChange={(value) => onListItemChange("experiences", index, "highlights_text", value)} placeholder={"负责接口开发与联调\n优化 SQL 查询延迟 30%"} rows={4} />
             </Field>

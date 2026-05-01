@@ -162,14 +162,14 @@ export default function AtsDashboard({
             hint={meta.providerLabel || "local"}
           />
           <MetricItem
-            label="语义相似度"
+            label="JD 加权覆盖"
             value={formatPercent(meta.semanticSimilarity)}
-            hint="向量语义相关度"
+            hint="企业 ATS 规则项覆盖"
           />
           <MetricItem
             label="关键词覆盖率"
             value={formatPercent(meta.keywordCoverage)}
-            hint="JD 关键词命中情况"
+            hint="硬技能与岗位词命中"
           />
           <MetricItem
             label="参考库命中"
