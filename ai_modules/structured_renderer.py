@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Dict, Iterable, List
 
 from ai_modules.structured_contracts import (
+    ResumeAwardRecord,
     ResumeContact,
     ResumeEducationRecord,
     ResumeExperienceRecord,
@@ -44,49 +45,39 @@ def _join_period(start_date: str, end_date: str) -> str:
 
 
 def _render_contact(contact: ResumeContact) -> List[str]:
-    """Render header contact rows."""
+    """Render the resume title."""
 
     lines: List[str] = []
     headline = (contact.full_name or "").strip() or "未命名候选人"
     role = (contact.target_role or "").strip()
     title = f"{headline} · {role}" if role else headline
     lines.extend([f"# {title}", ""])
-
-    details = [contact.email, contact.phone, contact.city]
-    details = [item.strip() for item in details if item and item.strip()]
-    if details:
-        lines.extend([" | ".join(details), ""])
-
-    target_lines = []
-    if (contact.target_company or "").strip():
-        target_lines.append(f"目标公司：{contact.target_company.strip()}")
-    if role:
-        target_lines.append(f"目标岗位：{role}")
-    if target_lines:
-        lines.extend(target_lines + [""])
     return lines
 
 
-def _render_skill_categories(skill_categories: List[ResumeSkillCategory]) -> List[str]:
-    """Render categorized skills."""
+def _render_personal_info(contact: ResumeContact, items: List[ResumeEducationRecord]) -> List[str]:
+    """Render contact, target, and education inside the top personal information block."""
 
-    if not skill_categories:
+    profile_lines = []
+    if (contact.full_name or "").strip():
+        profile_lines.append(f"姓名：{contact.full_name.strip()}")
+    if (contact.email or "").strip():
+        profile_lines.append(f"邮箱：{contact.email.strip()}")
+    if (contact.phone or "").strip():
+        profile_lines.append(f"电话：{contact.phone.strip()}")
+    if (contact.city or "").strip():
+        profile_lines.append(f"城市：{contact.city.strip()}")
+    if (contact.target_company or "").strip():
+        profile_lines.append(f"目标公司：{contact.target_company.strip()}")
+    if (contact.target_role or "").strip():
+        profile_lines.append(f"目标岗位：{contact.target_role.strip()}")
+
+    if not profile_lines and not items:
         return []
-    lines = ["## 核心技能"]
-    for category in skill_categories:
-        items = [item.strip() for item in category.items if item and item.strip()]
-        if not items:
-            continue
-        lines.append(f"- {category.category}: {' / '.join(items)}")
-    return lines + [""]
+    lines = ["## 个人信息"]
+    for item in profile_lines:
+        lines.append(f"- {item}")
 
-
-def _render_education(items: List[ResumeEducationRecord]) -> List[str]:
-    """Render education list."""
-
-    if not items:
-        return []
-    lines = ["## 教育背景"]
     for item in items:
         heading = " | ".join(
             part
@@ -98,7 +89,8 @@ def _render_education(items: List[ResumeEducationRecord]) -> List[str]:
             ]
             if part
         )
-        lines.append(f"- {heading}")
+        if heading:
+            lines.append(f"- 教育：{heading}")
         for highlight in item.highlights:
             lines.append(f"  - {highlight}")
     return lines + [""]
@@ -109,7 +101,7 @@ def _render_experience(items: List[ResumeExperienceRecord]) -> List[str]:
 
     if not items:
         return []
-    lines = ["## 工作经历"]
+    lines = ["## 实习经历"]
     for item in items:
         heading = " | ".join(
             part
@@ -156,17 +148,59 @@ def _render_projects(items: List[ResumeProjectRecord]) -> List[str]:
     return lines + [""]
 
 
+def _render_awards(items: List[ResumeAwardRecord]) -> List[str]:
+    """Render awards, scholarships, competitions, certificates, and honors."""
+
+    if not items:
+        return []
+    lines = ["## 获奖经历"]
+    for item in items:
+        heading = " | ".join(
+            part
+            for part in [
+                item.award_name.strip(),
+                item.level.strip(),
+                item.date.strip(),
+                item.issuer.strip(),
+            ]
+            if part
+        )
+        if heading:
+            lines.append(f"- {heading}")
+        if item.description.strip():
+            if heading:
+                lines.append(f"  - {item.description.strip()}")
+            else:
+                lines.append(f"- {item.description.strip()}")
+    return lines + [""]
+
+
+def _render_skill_categories(skill_categories: List[ResumeSkillCategory]) -> List[str]:
+    """Render categorized skills."""
+
+    if not skill_categories:
+        return []
+    lines = ["## 个人技能"]
+    for category in skill_categories:
+        items = [item.strip() for item in category.items if item and item.strip()]
+        if not items:
+            continue
+        lines.append(f"- {category.category}: {' / '.join(items)}")
+    return lines + [""]
+
+
 def render_resume_markdown(structured_resume: StructuredResume) -> str:
     """Render the validated contract into stable markdown text."""
 
     lines: List[str] = []
     lines.extend(_render_contact(structured_resume.contact))
-    if structured_resume.summary.strip():
-        lines.extend(["## 个人总结", "", structured_resume.summary.strip(), ""])
-    lines.extend(_render_skill_categories(structured_resume.skills))
+    lines.extend(_render_personal_info(structured_resume.contact, structured_resume.education))
     lines.extend(_render_experience(structured_resume.experience))
     lines.extend(_render_projects(structured_resume.projects))
-    lines.extend(_render_education(structured_resume.education))
+    lines.extend(_render_awards(structured_resume.awards))
+    lines.extend(_render_skill_categories(structured_resume.skills))
+    if structured_resume.summary.strip():
+        lines.extend(["## 个人总结", "", structured_resume.summary.strip(), ""])
     return "\n".join(_clean_lines(lines))
 
 
@@ -192,6 +226,7 @@ def build_contract_report(
         "section_counts": {
             "experience": len(structured_resume.experience),
             "projects": len(structured_resume.projects),
+            "awards": len(structured_resume.awards),
             "education": len(structured_resume.education),
             "skill_categories": len(structured_resume.skills),
         },

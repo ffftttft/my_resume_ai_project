@@ -1,0 +1,11 @@
+[
+  {
+    "id": "state-owned-general",
+    "name": "央国企通用简历模板",
+    "category": "央国企",
+    "description": "适合央国企、国企、事业单位风格的稳重中文简历。",
+    "file_name": "state-owned-general.jpg",
+    "style_tags": ["A4", "中文", "稳重", "蓝黑商务"],
+    "is_default": true
+  }
+]

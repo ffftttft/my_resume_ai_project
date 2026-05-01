@@ -72,6 +72,13 @@ class MemoryService:
             "form_state": form_state,
             "source": self._compact_text(draft.get("source") or "manual", 24) or "manual",
             "saved_at": self._compact_text(draft.get("saved_at"), 64) or self._now(),
+            "active_board": self._compact_text(draft.get("active_board"), 32) or "greenfield",
+            "greenfield_workspace": self._normalize_json_object(draft.get("greenfield_workspace")),
+            "existing_form_state": self._normalize_json_object(draft.get("existing_form_state")),
+            "existing_resume_workspace": self._normalize_json_object(draft.get("existing_resume_workspace")),
+            "resume_image_state": self._normalize_json_object(draft.get("resume_image_state")),
+            "selected_resume_template_id": self._compact_text(draft.get("selected_resume_template_id"), 128),
+            "resume_image_model": self._compact_text(draft.get("resume_image_model"), 64),
         }
 
     def _normalize_upload_record(self, record: Any) -> Dict[str, Any] | None:
@@ -132,6 +139,16 @@ class MemoryService:
                 normalized.append(note)
         return normalized[:8]
 
+    def _normalize_json_object(self, value: Any) -> Dict[str, Any]:
+        """Keep JSON-serializable object fields used for full workspace recovery."""
+
+        if not isinstance(value, dict):
+            return {}
+        try:
+            return json.loads(json.dumps(value, ensure_ascii=False))
+        except (TypeError, ValueError):
+            return {}
+
     def _normalize_snapshot_record(self, record: Any) -> Dict[str, Any] | None:
         """Keep only fields needed to restore or review a saved resume snapshot."""
 
@@ -151,6 +168,11 @@ class MemoryService:
             "resume_text": resume_text,
             "generation_mode": self._compact_text(record.get("generation_mode"), 48) or "fallback",
             "analysis_notes": self._normalize_analysis_notes(record.get("analysis_notes")),
+            "board": self._compact_text(record.get("board"), 32),
+            "workspace": self._normalize_json_object(record.get("workspace")),
+            "form_state": self._normalize_json_object(record.get("form_state")),
+            "image_generation": self._normalize_json_object(record.get("image_generation")),
+            "resume_image_page_open": bool(record.get("resume_image_page_open")),
         }
 
     def _normalize_recent_records(
@@ -276,6 +298,11 @@ class MemoryService:
                     "resume_text": generation_record.get("resume_text", ""),
                     "generation_mode": generation_record.get("generation_mode", "fallback"),
                     "analysis_notes": generation_record.get("analysis_notes") or [],
+                    "board": generation_record.get("board", ""),
+                    "workspace": generation_record.get("workspace") or {},
+                    "form_state": generation_record.get("form_state") or {},
+                    "image_generation": generation_record.get("image_generation") or {},
+                    "resume_image_page_open": bool(generation_record.get("resume_image_page_open")),
                 }
             )
         return self.save(payload)
@@ -303,6 +330,13 @@ class MemoryService:
             "form_state": draft_record.get("form_state") or {},
             "source": draft_record.get("source") or "manual",
             "saved_at": self._now(),
+            "active_board": draft_record.get("active_board") or "greenfield",
+            "greenfield_workspace": draft_record.get("greenfield_workspace") or {},
+            "existing_form_state": draft_record.get("existing_form_state") or {},
+            "existing_resume_workspace": draft_record.get("existing_resume_workspace") or {},
+            "resume_image_state": draft_record.get("resume_image_state") or {},
+            "selected_resume_template_id": draft_record.get("selected_resume_template_id") or "",
+            "resume_image_model": draft_record.get("resume_image_model") or "",
         }
         payload = self.save(payload)
         return payload["workspace_draft"]
@@ -320,6 +354,11 @@ class MemoryService:
                 "resume_text": snapshot_record.get("resume_text", ""),
                 "generation_mode": snapshot_record.get("generation_mode", "manual_preserve"),
                 "analysis_notes": snapshot_record.get("analysis_notes") or [],
+                "board": snapshot_record.get("board", ""),
+                "workspace": snapshot_record.get("workspace") or {},
+                "form_state": snapshot_record.get("form_state") or {},
+                "image_generation": snapshot_record.get("image_generation") or {},
+                "resume_image_page_open": bool(snapshot_record.get("resume_image_page_open")),
             }
         )
         payload = self.save(payload)

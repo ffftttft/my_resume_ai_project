@@ -86,7 +86,7 @@ export default function GreenfieldResumePreview({
           </div>
 
           <div className="preview-stage__chips">
-            <span className="chip">{generationMode === "openai" ? "AI 生成" : "本地兜底"}</span>
+            <span className="chip">{["openai", "deepseek"].includes(generationMode) ? "AI 生成" : "本地兜底"}</span>
             <span className={`chip ${hasResume ? "accent-chip" : ""}`}>
               {hasResume ? "已生成内容" : "空白工作区"}
             </span>

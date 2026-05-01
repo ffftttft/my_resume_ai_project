@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   CheckCircle2,
@@ -64,10 +64,51 @@ export default function AiProgressTimeline({
   contractWarning = "",
 }) {
   const activeStep = typeof step === "number" && step > 0 ? step : 0;
+  const [displayStep, setDisplayStep] = useState(activeStep);
+  const visualStep = Math.max(0, Math.min(displayStep, totalSteps));
+  const visualPhase = STEP_ORDER[Math.max(0, visualStep - 1)] || phase;
+  const visualStatus = useMemo(() => {
+    if (!activeStep) {
+      return status;
+    }
+    if (visualStep > 0 && visualStep < activeStep) {
+      const current = STEP_META[visualPhase]?.title || "正在处理";
+      return `${current}...`;
+    }
+    return status;
+  }, [activeStep, status, visualPhase, visualStep]);
+
+  useEffect(() => {
+    if (!activeStep) {
+      setDisplayStep(0);
+      return undefined;
+    }
+
+    setDisplayStep((current) => {
+      if (current > activeStep) return activeStep;
+      if (current <= 0) return 1;
+      return current;
+    });
+
+    const timer = window.setInterval(() => {
+      setDisplayStep((current) => {
+        if (current >= activeStep) {
+          window.clearInterval(timer);
+          return current;
+        }
+        return current + 1;
+      });
+    }, 620);
+
+    return () => window.clearInterval(timer);
+  }, [activeStep]);
+
   const results = Array.isArray(jobInsight?.results) ? jobInsight.results : [];
   const hasInsightPayload = Boolean(jobInsight?.query || results.length || jobInsight?.warning);
   const modeLabel =
-    jobInsight?.mode === "network"
+    !jobInsight
+      ? "未执行"
+      : jobInsight?.mode === "network"
       ? "已联网"
       : jobInsight?.mode === "cached"
         ? "缓存命中"
@@ -78,9 +119,11 @@ export default function AiProgressTimeline({
             : jobInsight?.mode === "error"
               ? "搜索异常"
               : "待搜索";
-  const insightText = results.length
-    ? `已命中 ${results.length} 条岗位来源，默认只围绕公司和岗位检索。`
-    : jobInsight?.warning || "当前没有可用的联网岗位情报，将仅基于用户填写的 JD 继续执行。";
+  const insightText = !jobInsight
+    ? "岗位情报不会自动检索；点击刷新后才会显示来源、缓存和查询词。"
+    : results.length
+      ? `已命中 ${results.length} 条岗位来源，默认只围绕公司和岗位检索。`
+      : jobInsight?.warning || "当前没有可用的联网岗位情报，将仅基于用户填写的 JD 继续执行。";
 
   return (
     <motion.article
@@ -96,7 +139,7 @@ export default function AiProgressTimeline({
           <p className="ai-progress-card__eyebrow">AI 进度</p>
           <h3 className="ai-progress-card__title">当前执行步骤</h3>
           <p className="ai-progress-card__copy">
-            {status || "还没有开始执行，启动生成或优化后，这里会显示 AI 当前做到哪一步。"}
+            {visualStatus || "还没有开始执行，启动生成或优化后，这里会显示 AI 当前做到哪一步。"}
           </p>
         </div>
         <div className="ai-progress-card__actions">
@@ -107,7 +150,7 @@ export default function AiProgressTimeline({
             transition={{ duration: 0.3 }}
             className={`chip ${isStreaming ? "accent-chip" : ""}`}
           >
-            {activeStep > 0 ? `${Math.min(activeStep, totalSteps)} / ${totalSteps}` : "待开始"}
+            {visualStep > 0 ? `${visualStep} / ${totalSteps}` : "待开始"}
           </motion.span>
           <RippleButton
             onClick={onRefreshJobContext}
@@ -131,9 +174,9 @@ export default function AiProgressTimeline({
       <div className="ai-progress-card__timeline">
         {STEP_ORDER.map((stepKey, index) => {
           const stepIndex = index + 1;
-          const stepState = getStepState(stepIndex, activeStep, isStreaming);
+          const stepState = getStepState(stepIndex, visualStep, isStreaming || visualStep < activeStep);
           const Icon = STEP_META[stepKey].icon;
-          const isCurrentPhase = phase === stepKey;
+          const isCurrentPhase = visualPhase === stepKey;
           return (
             <motion.div
               key={stepKey}
@@ -240,7 +283,7 @@ export default function AiProgressTimeline({
               whileHover={{ scale: 1.05 }}
               className="ai-progress-card__pill"
             >
-              {jobInsight?.provider || "Tavily"}
+              {jobInsight?.provider || "岗位情报"}
             </motion.span>
             <motion.span
               whileHover={{ scale: 1.05 }}
@@ -252,7 +295,7 @@ export default function AiProgressTimeline({
               whileHover={{ scale: 1.05 }}
               className="ai-progress-card__pill"
             >
-              {jobInsight?.cached ? "缓存" : "实时"}
+              {!jobInsight ? "等待刷新" : jobInsight?.cached ? "缓存" : "实时"}
             </motion.span>
           </div>
           <p className="ai-progress-card__insight-text">{insightText}</p>

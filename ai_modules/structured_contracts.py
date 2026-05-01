@@ -322,6 +322,21 @@ class ResumeProjectRecord(StrictModel):
         return _clean_text_list(value, limit=8)
 
 
+class ResumeAwardRecord(StrictModel):
+    """Award, scholarship, competition, certificate, or honor item."""
+
+    award_name: str = Field(..., description="Award, scholarship, competition, certificate, or honor name.")
+    date: str = Field(default="", description="Award month in YYYY-MM when known.")
+    level: str = Field(default="", description="Award level or grade, such as national second prize or school scholarship.")
+    issuer: str = Field(default="", description="Issuer, organizer, school, company, or association.")
+    description: str = Field(default="", description="Short grounded context or outcome for this award.")
+
+    @field_validator("date")
+    @classmethod
+    def validate_date(cls, value: str) -> str:
+        return _validate_month(value, "date")
+
+
 class StructuredResume(StrictModel):
     """Full validated resume contract returned by the model."""
 
@@ -348,6 +363,10 @@ class StructuredResume(StrictModel):
     projects: List[ResumeProjectRecord] = Field(
         default_factory=list,
         description="Optional project records when the candidate has meaningful project evidence.",
+    )
+    awards: List[ResumeAwardRecord] = Field(
+        default_factory=list,
+        description="Award, scholarship, competition, certificate, and honor records grounded in the input.",
     )
 
 

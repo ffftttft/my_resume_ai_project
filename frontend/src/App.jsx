@@ -941,7 +941,7 @@ export default function App() {
 
             <div className="flex flex-wrap gap-2">
               <span className="chip">阶段：本地测试版</span>
-              <span className="chip">{backendStatus?.ai_available ? "已接入 OpenAI" : "本地兜底模式"}</span>
+              <span className="chip">{backendStatus?.ai_available ? "已接入 DeepSeek" : "本地兜底模式"}</span>
               <span className="chip">
                 最近启动：{memory?.last_started_at ? new Date(memory.last_started_at).toLocaleString() : "尚未记录"}
               </span>

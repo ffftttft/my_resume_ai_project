@@ -200,7 +200,7 @@ export default function HistoryCard({
       <div className="history-board__header">
         <div>
           <p className="history-board__eyebrow">历史档案</p>
-          <h3 className="history-board__title">本地历史记录</h3>
+          <h3 className="history-board__title">历史记录</h3>
           <p className="history-board__description">
             快照、上传和导出记录都收在这里。重复内容会自动合并，只保留最新一条。
           </p>

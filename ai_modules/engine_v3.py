@@ -66,6 +66,7 @@ class ResumeAIEngine(TightResumeAIEngine):
             education=generated.education or fallback.education,
             skills=generated.skills or fallback.skills,
             projects=generated.projects or fallback.projects,
+            awards=generated.awards or fallback.awards,
         )
 
     def _revision_fallback_resume(self, profile_payload: Dict, resume_text: str) -> StructuredResume:
@@ -155,7 +156,7 @@ class ResumeAIEngine(TightResumeAIEngine):
         except Exception as exc:
             return {
                 "questions": fallback_questions,
-                "detected_gaps": ["openai_error"],
+                "detected_gaps": ["model_error"],
                 "ready_for_generation": len(fallback_questions) == 0,
                 "used_ai": False,
                 "warning": f"Structured question generation failed: {exc}",
@@ -171,7 +172,7 @@ class ResumeAIEngine(TightResumeAIEngine):
             return self._fallback_resume_result(
                 profile_payload,
                 fallback_questions,
-                ["OpenAI is unavailable, so the workspace rendered a local structured fallback."],
+                ["AI model is unavailable, so the workspace rendered a local structured fallback."],
                 warning="Structured model output unavailable. Local contract fallback used.",
             )
 
@@ -190,7 +191,7 @@ class ResumeAIEngine(TightResumeAIEngine):
                 structured_resume,
                 analysis_notes=analysis_notes,
                 questions=questions,
-                mode="openai",
+                mode=self.ai_mode,
                 used_ai=True,
                 title=result.title,
                 contract_source="model",
@@ -229,7 +230,7 @@ class ResumeAIEngine(TightResumeAIEngine):
                 title=fallback_title,
                 structured_resume=fallback_resume,
                 questions=fallback_questions,
-                analysis_notes=["OpenAI is unavailable, so a local structured fallback was streamed instead."],
+                analysis_notes=["AI model is unavailable, so a local structured fallback was streamed instead."],
             )
             raw_json = ""
             for chunk in self._chunk_text(fallback_generation.model_dump_json(), chunk_size=120):
@@ -251,7 +252,7 @@ class ResumeAIEngine(TightResumeAIEngine):
                 "data": self._fallback_resume_result(
                     profile_payload,
                     fallback_questions,
-                    ["OpenAI is unavailable, so the workspace rendered a local structured fallback."],
+                    ["AI model is unavailable, so the workspace rendered a local structured fallback."],
                     warning="Structured model output unavailable. Local contract fallback used.",
                 ),
             }
@@ -260,26 +261,14 @@ class ResumeAIEngine(TightResumeAIEngine):
         raw_json = ""
 
         try:
-            with self.client.responses.stream(
-                model=self.model_name,
-                input=build_resume_messages(session_profile),
-                text_format=ResumeGenerationResult,
-                temperature=0.2,
-            ) as stream:
-                for event in stream:
-                    if getattr(event, "type", "") != "response.output_text.delta":
-                        continue
-                    delta = getattr(event, "delta", "") or ""
-                    if not delta:
-                        continue
-                    raw_json += delta
-                    yield {"event": "partial", "data": {"delta": delta, "raw_json": raw_json}}
+            for delta in self._stream_structured_json(
+                ResumeGenerationResult,
+                build_resume_messages(session_profile),
+            ):
+                raw_json += delta
+                yield {"event": "partial", "data": {"delta": delta, "raw_json": raw_json}}
 
-                parsed_response = stream.get_final_response()
-
-            parsed = parsed_response.output_parsed or self._recover_stream_result(
-                raw_json or getattr(parsed_response, "output_text", "") or "",
-            )
+            parsed = self._recover_stream_result(raw_json)
             if not parsed:
                 raise ValueError("The model stream finished without a valid structured result.")
 
@@ -306,7 +295,7 @@ class ResumeAIEngine(TightResumeAIEngine):
                     structured_resume,
                     analysis_notes=analysis_notes,
                     questions=questions,
-                    mode="openai",
+                    mode=self.ai_mode,
                     used_ai=True,
                     title=parsed.title or fallback_title,
                     contract_source="model",
@@ -363,7 +352,7 @@ class ResumeAIEngine(TightResumeAIEngine):
         if not self.structured_client:
             return self._result_from_structured_resume(
                 fallback_resume,
-                analysis_notes=["OpenAI is unavailable, so the current draft was preserved through the local contract renderer."],
+                analysis_notes=["AI model is unavailable, so the current draft was preserved through the local contract renderer."],
                 questions=[],
                 mode="fallback",
                 used_ai=False,
@@ -388,7 +377,7 @@ class ResumeAIEngine(TightResumeAIEngine):
                 structured_resume,
                 analysis_notes=analysis_notes,
                 questions=[],
-                mode="openai",
+                mode=self.ai_mode,
                 used_ai=True,
                 title=result.title or fallback_title,
                 contract_source="model",
@@ -419,7 +408,7 @@ class ResumeAIEngine(TightResumeAIEngine):
             return self._fallback_existing_resume_result(
                 payload,
                 fallback_questions,
-                "OpenAI is unavailable, so the uploaded resume was normalized through the local contract renderer.",
+                "AI model is unavailable, so the uploaded resume was normalized through the local contract renderer.",
                 warning="Structured model output unavailable. Local contract fallback used.",
             )
 
@@ -432,11 +421,12 @@ class ResumeAIEngine(TightResumeAIEngine):
                     target_role=(payload.get("target_role") or "").strip(),
                     job_requirements=(payload.get("job_requirements") or "").strip(),
                     instruction=(payload.get("instruction") or "").strip(),
-                    additional_answers=payload.get("additional_answers") or [],
-                    persistent_profile_memory=self.session_context.get("persistent_profile_memory") or {},
-                    web_context=payload.get("web_context") or [],
-                ),
-            )
+                      additional_answers=payload.get("additional_answers") or [],
+                      persistent_profile_memory=self.session_context.get("persistent_profile_memory") or {},
+                      web_context=payload.get("web_context") or [],
+                      template_guidance=payload.get("template_guidance") or {},
+                  ),
+              )
             questions = self._clean_questions(
                 result.questions,
                 already_answered=self._has_answered_follow_up(payload),
@@ -447,7 +437,7 @@ class ResumeAIEngine(TightResumeAIEngine):
                 structured_resume,
                 analysis_notes=analysis_notes,
                 questions=questions,
-                mode="openai",
+                mode=self.ai_mode,
                 used_ai=True,
                 title=result.title or fallback_title,
                 contract_source="model",
@@ -485,7 +475,7 @@ class ResumeAIEngine(TightResumeAIEngine):
                 title=fallback_title,
                 structured_resume=fallback_resume,
                 questions=fallback_questions,
-                analysis_notes=["OpenAI is unavailable, so a local structured fallback was streamed instead."],
+                analysis_notes=["AI model is unavailable, so a local structured fallback was streamed instead."],
             )
             raw_json = ""
             for chunk in self._chunk_text(fallback_generation.model_dump_json(), chunk_size=120):
@@ -507,7 +497,7 @@ class ResumeAIEngine(TightResumeAIEngine):
                 "data": self._fallback_existing_resume_result(
                     payload,
                     fallback_questions,
-                    "OpenAI is unavailable, so the uploaded resume was normalized through the local contract renderer.",
+                    "AI model is unavailable, so the uploaded resume was normalized through the local contract renderer.",
                     warning="Structured model output unavailable. Local contract fallback used.",
                 ),
             }
@@ -516,35 +506,24 @@ class ResumeAIEngine(TightResumeAIEngine):
         raw_json = ""
 
         try:
-            with self.client.responses.stream(
-                model=self.model_name,
-                input=build_existing_resume_messages(
+            for delta in self._stream_structured_json(
+                ResumeGenerationResult,
+                build_existing_resume_messages(
                     resume_text=(payload.get("resume_text") or "").strip(),
                     target_company=(payload.get("target_company") or "").strip(),
                     target_role=(payload.get("target_role") or "").strip(),
                     job_requirements=(payload.get("job_requirements") or "").strip(),
                     instruction=(payload.get("instruction") or "").strip(),
-                    additional_answers=payload.get("additional_answers") or [],
-                    persistent_profile_memory=self.session_context.get("persistent_profile_memory") or {},
-                    web_context=payload.get("web_context") or [],
-                ),
-                text_format=ResumeGenerationResult,
-                temperature=0.2,
-            ) as stream:
-                for event in stream:
-                    if getattr(event, "type", "") != "response.output_text.delta":
-                        continue
-                    delta = getattr(event, "delta", "") or ""
-                    if not delta:
-                        continue
-                    raw_json += delta
-                    yield {"event": "partial", "data": {"delta": delta, "raw_json": raw_json}}
+                      additional_answers=payload.get("additional_answers") or [],
+                      persistent_profile_memory=self.session_context.get("persistent_profile_memory") or {},
+                      web_context=payload.get("web_context") or [],
+                      template_guidance=payload.get("template_guidance") or {},
+                  ),
+              ):
+                raw_json += delta
+                yield {"event": "partial", "data": {"delta": delta, "raw_json": raw_json}}
 
-                parsed_response = stream.get_final_response()
-
-            parsed = parsed_response.output_parsed or self._recover_stream_result(
-                raw_json or getattr(parsed_response, "output_text", "") or "",
-            )
+            parsed = self._recover_stream_result(raw_json)
             if not parsed:
                 raise ValueError("The model stream finished without a valid structured result.")
 
@@ -571,7 +550,7 @@ class ResumeAIEngine(TightResumeAIEngine):
                     structured_resume,
                     analysis_notes=analysis_notes,
                     questions=questions,
-                    mode="openai",
+                    mode=self.ai_mode,
                     used_ai=True,
                     title=parsed.title or fallback_title,
                     contract_source="model",

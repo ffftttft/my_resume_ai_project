@@ -21,6 +21,15 @@ Good: 围绕数据工程岗位要求补强 Spark、Airflow 与数据建模证据
 """.strip()
 
 
+STRICT_FACT_BOUNDARY_BLOCK = """
+Strict fact boundary:
+- The profile payload, uploaded resume text, attachments, and user follow-up answers are the only candidate-fact sources.
+- Job requirements and web_context may guide wording only; they are never evidence for candidate experience.
+- Do not create missing sections. If evidence for awards, certificates, projects, experience, metrics, or tools is absent, leave the field empty or omit the claim.
+- Never fabricate numbers, rankings, time ranges, company names, school names, project names, certificates, titles, tools, awards, or outcomes.
+""".strip()
+
+
 STRICT_RESUME_SYSTEM_PROMPT = f"""
 You are a principal resume architect building a Chinese resume workspace.
 Return only content that fits the provided response schema.
@@ -34,6 +43,9 @@ Use Action-Task-Result framing inside every achievement bullet:
 Quantify the result only when the input supports a metric or count.
 If evidence is incomplete, ask at most 3 compressed follow-up questions and still fill the rest of the schema with supported facts.
 If additional_answers already contains useful follow-up evidence, do not ask more questions.
+Put scholarships, competitions, certificates, awards, honors, and prizes into structured_resume.awards only.
+Do not invent award names, dates, issuers, levels, certificates, or competition results. If no award evidence exists, return awards as an empty array.
+{STRICT_FACT_BOUNDARY_BLOCK}
 {STRICT_FEW_SHOT_BLOCK}
 """.strip()
 
@@ -60,6 +72,8 @@ Preserve grounded facts from the current draft and profile payload.
 If web_context is provided, use it only to strengthen terminology, not to borrow facts or outcomes.
 Apply the user's instruction by rewriting the strongest evidence in sharper Action-Task-Result language.
 Do not invent facts, dates, companies, tools, or metrics.
+Preserve award evidence in structured_resume.awards and do not move awards into skills or education highlights.
+{STRICT_FACT_BOUNDARY_BLOCK}
 {STRICT_FEW_SHOT_BLOCK}
 """.strip()
 
@@ -73,6 +87,9 @@ If web_context is provided, use it only as language and terminology guidance. Do
 Use Action-Task-Result phrasing for achievements and quantify outcomes when evidence exists.
 If evidence is still incomplete, ask at most 3 compressed questions.
 If additional_answers already contains useful evidence, do not ask more questions.
+Extract scholarships, competitions, certificates, awards, honors, and prizes into structured_resume.awards only.
+Do not invent award names, dates, issuers, levels, certificates, or competition results. If no award evidence exists, return awards as an empty array.
+{STRICT_FACT_BOUNDARY_BLOCK}
 {STRICT_FEW_SHOT_BLOCK}
 """.strip()
 
@@ -104,6 +121,8 @@ def build_resume_input(profile_payload: Dict) -> str:
                 "Use Action-Task-Result wording for achievements.",
                 "If additional_answers is not empty, do not ask more questions.",
                 "If details are sufficient, return an empty questions array.",
+                "Never use job requirements or web_context as evidence for candidate facts.",
+                "Do not invent missing awards, projects, companies, schools, dates, tools, metrics, or outcomes.",
             ],
             "profile_payload": profile_payload,
         },
@@ -152,6 +171,7 @@ def build_revision_input(profile_payload: Dict, resume_text: str, instruction: s
                 "Apply the user instruction carefully.",
                 "Use Action-Task-Result wording when rewriting achievements.",
                 "Keep the final resume in Chinese markdown.",
+                "Do not add facts outside current_resume_text, profile_payload, and user instruction evidence.",
             ],
             "revision_instruction": instruction,
             "current_resume_text": resume_text,
@@ -190,6 +210,8 @@ def build_existing_resume_input(
                 "Ask at most 3 questions total.",
                 "Use Action-Task-Result wording for achievements.",
                 "If additional_answers is not empty, do not ask more questions.",
+                "Do not add facts outside the uploaded resume and additional answers.",
+                "Job requirements and web_context guide wording only; they are not candidate evidence.",
             ],
             "resume_text": resume_text,
             "target_company": target_company,
@@ -279,6 +301,7 @@ def build_existing_resume_messages(
     additional_answers: list[Dict],
     persistent_profile_memory: Dict | None = None,
     web_context: list[Dict] | None = None,
+    template_guidance: Dict | None = None,
 ) -> list[Dict[str, str]]:
     """Build chat-completions messages for optimizing an uploaded resume."""
 
@@ -297,6 +320,7 @@ def build_existing_resume_messages(
                     "additional_answers": additional_answers,
                     "persistent_profile_memory": persistent_profile_memory or {},
                     "web_context": web_context or [],
+                    "template_guidance": template_guidance or {},
                 },
                 ensure_ascii=False,
                 indent=2,

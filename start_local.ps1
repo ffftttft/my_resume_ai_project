@@ -63,12 +63,12 @@ Ensure-EnvFile -SourcePath $BackendEnvExample -TargetPath $BackendEnv
 Ensure-EnvFile -SourcePath $FrontendEnvExample -TargetPath $FrontendEnv
 
 $backendEnvContent = Get-Content -Raw $BackendEnv
-if ($backendEnvContent -match "(?m)^OPENAI_API_KEY=$") {
-    Write-Step "OPENAI_API_KEY not set. Demo mode is ready and the backend will use local fallback."
-    Write-Step "If judges need live AI output, put a restricted temporary key in backend/.env. Do not commit that file."
+if ($backendEnvContent -match "(?m)^DEEPSEEK_API_KEY=$") {
+    Write-Step "DEEPSEEK_API_KEY not set. Demo mode is ready and the backend will use local fallback."
+    Write-Step "If judges need live AI output, put a restricted temporary DeepSeek key in backend/.env. Do not commit that file."
 }
 else {
-    Write-Step "OPENAI_API_KEY detected. Backend will prefer OpenAI."
+    Write-Step "DEEPSEEK_API_KEY detected. Backend will prefer DeepSeek for resume text generation."
 }
 
 if (-not (Test-BackendDependencies)) {

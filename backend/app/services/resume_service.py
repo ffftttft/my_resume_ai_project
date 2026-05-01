@@ -125,6 +125,25 @@ class ResumeService:
         enriched["web_context"] = web_context
         return enriched, warning
 
+    @staticmethod
+    def _attach_template_guidance(payload: Dict, template_id: str = "") -> Dict:
+        """Add deterministic template-capacity guidance for the text model."""
+
+        if not template_id:
+            return payload
+        enriched = dict(payload)
+        enriched["template_guidance"] = {
+            "template_id": template_id,
+            "file_strategy": "DOCX template fill",
+            "rules": [
+                "每段实习、工作或项目经历优先输出 3 条要点。",
+                "每条要点尽量控制在 42 个中文字符左右，避免生成后挤出一页模板。",
+                "没有事实依据的经历、奖项、证书、数字、公司、项目和时间不要写。",
+                "没有对应经历时留空，由文件生成阶段删除该板块并上移后续内容。",
+            ],
+        }
+        return enriched
+
     def _attach_web_context_to_existing_payload(
         self,
         payload: Dict,
@@ -213,6 +232,7 @@ class ResumeService:
     def optimize_existing_resume(self, payload: Dict) -> Dict:
         """Optimize an uploaded resume for a target job."""
 
+        payload = self._attach_template_guidance(payload, payload.get("template_id", ""))
         enriched_payload, search_warning = self._attach_web_context_to_existing_payload(payload)
         result = self.ai_engine.optimize_existing_resume(enriched_payload)
         result = self._append_warning_note(result, search_warning)
@@ -251,6 +271,7 @@ class ResumeService:
     def stream_existing_resume(self, payload: Dict):
         """Stream uploaded-resume optimization events and register the final result."""
 
+        payload = self._attach_template_guidance(payload, payload.get("template_id", ""))
         yield self._build_status_event(
             phase="search",
             message="正在联网检索岗位信息...",
@@ -325,10 +346,10 @@ class ResumeService:
 
         return self.memory_service.save_resume_snapshot(payload)
 
-    def stream_generate_resume(self, profile: UserProfile):
+    def stream_generate_resume(self, profile: UserProfile, template_id: str = ""):
         """Stream new-resume generation events and register the final result."""
 
-        profile_payload = profile.model_dump()
+        profile_payload = self._attach_template_guidance(profile.model_dump(), template_id)
         yield self._build_status_event(
             phase="search",
             message="正在联网检索岗位信息...",
@@ -393,10 +414,12 @@ class ResumeService:
                 continue
             yield event
 
-    def generate_resume(self, profile: UserProfile) -> Dict:
+    def generate_resume(self, profile: UserProfile, template_id: str = "") -> Dict:
         """Create a resume draft and register each selected module in memory."""
 
-        profile_payload, search_warning = self._attach_web_context_to_profile(profile.model_dump())
+        profile_payload, search_warning = self._attach_web_context_to_profile(
+            self._attach_template_guidance(profile.model_dump(), template_id)
+        )
         result = self.ai_engine.generate_resume(profile_payload)
         result = self._append_warning_note(result, search_warning)
         profile_memory = self.profile_memory_service.sync_from_profile(

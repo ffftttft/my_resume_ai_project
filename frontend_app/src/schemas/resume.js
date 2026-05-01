@@ -94,6 +94,16 @@ export const projectRecordSchema = z
   })
   .strict();
 
+export const awardRecordSchema = z
+  .object({
+    award_name: stringField,
+    date: stringField,
+    level: stringField,
+    issuer: stringField,
+    description: stringField,
+  })
+  .strict();
+
 export const educationRecordSchema = z
   .object({
     school_name: stringField,
@@ -113,6 +123,7 @@ export const structuredResumeSchema = z
     education: z.array(educationRecordSchema),
     skills: z.array(skillCategorySchema),
     projects: z.array(projectRecordSchema),
+    awards: z.array(awardRecordSchema).default([]),
   })
   .strict();
 
@@ -130,6 +141,7 @@ export const contractReportSchema = z
       .object({
         experience: z.number(),
         projects: z.number(),
+        awards: z.number().default(0),
         education: z.number(),
         skill_categories: z.number(),
       })
@@ -162,6 +174,19 @@ export const semanticAtsScoreSchema = z
     keywordCoverage: z.number(),
     provider: stringField,
     model: stringField,
+    scoreBreakdown: z
+      .array(
+        z
+          .object({
+            key: stringField,
+            label: stringField,
+            score: z.number(),
+            weight: z.number(),
+          })
+          .strict(),
+      )
+      .optional(),
+    riskFlags: stringListField.optional(),
     scoringVersion: stringField,
     warning: stringField.optional(),
   })
@@ -259,6 +284,17 @@ const partialProjectRecordSchema = z
   .partial()
   .passthrough();
 
+const partialAwardRecordSchema = z
+  .object({
+    award_name: z.string().optional(),
+    date: z.string().optional(),
+    level: z.string().optional(),
+    issuer: z.string().optional(),
+    description: z.string().optional(),
+  })
+  .partial()
+  .passthrough();
+
 const partialEducationRecordSchema = z
   .object({
     school_name: z.string().optional(),
@@ -279,6 +315,7 @@ const partialStructuredResumeSchema = z
     education: z.array(partialEducationRecordSchema).optional(),
     skills: z.array(partialSkillCategorySchema).optional(),
     projects: z.array(partialProjectRecordSchema).optional(),
+    awards: z.array(partialAwardRecordSchema).optional(),
   })
   .partial()
   .passthrough();
@@ -297,6 +334,7 @@ const partialContractReportSchema = z
       .object({
         experience: z.number().optional(),
         projects: z.number().optional(),
+        awards: z.number().optional(),
         education: z.number().optional(),
         skill_categories: z.number().optional(),
       })
@@ -413,6 +451,16 @@ export const projectItemRequestSchema = z
   })
   .strict();
 
+export const awardItemRequestSchema = z
+  .object({
+    award_name: stringField,
+    date: stringField,
+    level: stringField,
+    issuer: stringField,
+    description: stringField,
+  })
+  .strict();
+
 export const userProfileRequestSchema = z
   .object({
     basic_info: basicInfoRequestSchema,
@@ -420,6 +468,7 @@ export const userProfileRequestSchema = z
     education: z.array(educationItemRequestSchema),
     experiences: z.array(experienceItemRequestSchema),
     projects: z.array(projectItemRequestSchema),
+    awards: z.array(awardItemRequestSchema).default([]),
     modules: stringListField,
     membership_level: z.enum(["basic", "advanced"]),
     use_full_information: z.boolean(),
@@ -431,6 +480,7 @@ export const userProfileRequestSchema = z
 export const generateResumeRequestSchema = z
   .object({
     profile: userProfileRequestSchema,
+    template_id: z.string().optional(),
   })
   .strict();
 
@@ -475,18 +525,24 @@ export const saveResumeSnapshotRequestSchema = z
     resume_text: stringField,
     generation_mode: stringField,
     analysis_notes: stringListField,
+    board: z.string().optional(),
+    workspace: z.record(z.string(), z.unknown()).optional(),
+    form_state: z.record(z.string(), z.unknown()).optional(),
+    image_generation: z.record(z.string(), z.unknown()).optional(),
+    resume_image_page_open: z.boolean().optional(),
   })
   .strict();
 
 export const existingResumeOptimizeRequestSchema = z
-  .object({
-    resume_text: stringField,
-    target_company: z.string().default(""),
-    target_role: z.string().default(""),
-    job_requirements: z.string().default(""),
-    instruction: z.string().default(""),
-    additional_answers: z.array(clarificationAnswerRequestSchema),
-  })
+    .object({
+      resume_text: stringField,
+      target_company: z.string().default(""),
+      target_role: z.string().default(""),
+      job_requirements: z.string().default(""),
+      instruction: z.string().default(""),
+      additional_answers: z.array(clarificationAnswerRequestSchema),
+      template_id: z.string().optional(),
+    })
   .strict();
 
 export function parseGenerateResumeRequest(payload) {

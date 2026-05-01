@@ -13,6 +13,27 @@ function MetricRow({ icon: Icon, label, value }) {
   );
 }
 
+function StatusPill({ tone = "pending", children }) {
+  return <span className={`atelier-sidebar__status-pill atelier-sidebar__status-pill--${tone}`}>{children}</span>;
+}
+
+function ModelStatusBlock({ title, model, status, latency, meta, tone }) {
+  return (
+    <section className="atelier-sidebar__model-block">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="atelier-sidebar__model-title">{title}</p>
+          <h3 className="atelier-sidebar__status-title mt-1" title={model}>
+            {model}
+          </h3>
+        </div>
+        <StatusPill tone={tone}>{status}</StatusPill>
+      </div>
+      <p className="atelier-sidebar__status-meta mt-2">{meta || (latency ? `延迟 ${latency}` : "未检测延迟")}</p>
+    </section>
+  );
+}
+
 export default function WorkspaceSidebar({
   sessionUsername,
   currentModeLabel,
@@ -20,14 +41,15 @@ export default function WorkspaceSidebar({
   accountPointsLabel,
   accountMembershipLabel,
   currentBillingModeLabel,
-  currentModelLabel,
-  modelAvailability,
-  modelAvailabilityLabel = "不可用",
-  modelStatusTone = "pending",
-  modelHealthLabel = "待检测",
-  modelLatencyLabel,
+  textModel,
+  textModelStatus,
+  textModelLatency,
+  textModelTone,
+  imageModel,
+  imageModelStatus,
+  imageModelMeta,
+  imageModelTone,
   modelCheckedLabel,
-  modelStatusHint = "",
   modelStatusLoading,
   onRefreshModel,
 }) {
@@ -61,32 +83,12 @@ export default function WorkspaceSidebar({
           </div>
         </section>
 
-        <div className="atelier-sidebar__card atelier-sidebar__card--compact mt-auto">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0 flex-1">
+        <section className="atelier-sidebar__card atelier-sidebar__card--compact mt-auto">
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <div className="min-w-0">
               <p className="atelier-sidebar__section-label">模型状态</p>
-              <h3 className="atelier-sidebar__status-title mt-2" title={currentModelLabel}>
-                {currentModelLabel}
-              </h3>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                <span
-                  className={`atelier-sidebar__status-pill atelier-sidebar__status-pill--${modelStatusTone}`}
-                >
-                  {modelHealthLabel}
-                </span>
-                <p
-                  className={`atelier-sidebar__status-meta atelier-sidebar__status-meta--${modelStatusTone}`}
-                >
-                  {(modelAvailabilityLabel || (modelAvailability ? "可用" : "不可用"))} · 延迟{" "}
-                  {modelLatencyLabel}
-                </p>
-              </div>
               <p className="atelier-sidebar__status-submeta mt-1">最近检测 {modelCheckedLabel}</p>
-              <p className="atelier-sidebar__status-hint mt-3">
-                {modelStatusHint || "手动刷新后会重新探测当前模型与接口延迟。"}
-              </p>
             </div>
-
             <button
               type="button"
               onClick={onRefreshModel}
@@ -97,7 +99,25 @@ export default function WorkspaceSidebar({
               {modelStatusLoading ? "刷新中" : "刷新"}
             </button>
           </div>
-        </div>
+
+          <div className="grid gap-3">
+            <ModelStatusBlock
+              title="正文生成"
+              model={textModel}
+              status={textModelStatus}
+              latency={textModelLatency}
+              tone={textModelTone}
+            />
+
+            <ModelStatusBlock
+              title="文件生成"
+              model={imageModel}
+              status={imageModelStatus}
+              meta={imageModelMeta}
+              tone={imageModelTone}
+            />
+          </div>
+        </section>
       </div>
     </aside>
   );

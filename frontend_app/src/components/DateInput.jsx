@@ -59,12 +59,12 @@ export default function DateInput({
           disabled={disabled}
         />
         <div className="date-input__actions">
-          {allowPresent && value === "鑷充粖" ? <span className="date-input__present">鑷充粖</span> : null}
+          {allowPresent && value === "至今" ? <span className="date-input__present">至今</span> : null}
           <button
             type="button"
             onClick={openPicker}
             className="date-input__button"
-            aria-label={mode === "month" ? "閫夋嫨骞存湀" : "閫夋嫨鏃ユ湡"}
+            aria-label={mode === "month" ? "选择年月" : "选择日期"}
             disabled={disabled}
           >
             <CalendarDays size={16} />

@@ -18,6 +18,12 @@ import {
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") || "http://127.0.0.1:8000";
 
+function toApiUrl(pathOrUrl) {
+  if (!pathOrUrl) return "";
+  if (/^https?:\/\//i.test(pathOrUrl)) return pathOrUrl;
+  return `${API_BASE_URL}${pathOrUrl.startsWith("/") ? pathOrUrl : `/${pathOrUrl}`}`;
+}
+
 function toUserFacingNetworkMessage(error) {
   const message = String(error?.message || "");
   if (
@@ -101,6 +107,146 @@ export async function fetchHealth() {
 
 export async function fetchModelStatus() {
   return requestJson("/api/model-status");
+}
+
+export async function fetchResumeImageTemplates() {
+  const data = await requestJson("/api/resume/image/templates");
+  return {
+    ...data,
+    templates: (data.templates || []).map((template) => ({
+      ...template,
+      preview_url: toApiUrl(template.preview_url),
+    })),
+  };
+}
+
+export async function fetchResumeFileTemplates() {
+  const data = await requestJson("/api/resume/file/templates");
+  return {
+    ...data,
+    templates: (data.templates || []).map((template) => ({
+      ...template,
+      preview_url: toApiUrl(template.preview_url),
+    })),
+  };
+}
+
+export async function uploadAvatar(file) {
+  const formData = new FormData();
+  formData.append("file", file);
+  const data = await requestJson("/api/avatar/upload", {
+    method: "POST",
+    body: formData,
+  });
+  return {
+    ...data,
+    preview_url: toApiUrl(data.preview_url),
+  };
+}
+
+export async function generateResumeImage(payload) {
+  const data = await requestJson("/api/resume/image/generate", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  return {
+    ...data,
+    preview_url: toApiUrl(data.preview_url),
+  };
+}
+
+export async function generateResumeFile(payload) {
+  const data = await requestJson("/api/resume/file/generate", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  return {
+    ...data,
+    preview_url: toApiUrl(data.preview_url),
+    download_url: toApiUrl(data.download_url),
+  };
+}
+
+export async function downloadResumeFile(savedName) {
+  const encodedName = encodeURIComponent(savedName || "");
+  let response;
+
+  try {
+    response = await fetch(`${API_BASE_URL}/api/resume/file/generated/${encodedName}`);
+  } catch (error) {
+    throw new Error(toUserFacingNetworkMessage(error));
+  }
+
+  if (!response.ok) {
+    throw new Error(await parseExportError(response));
+  }
+
+  const blob = await response.blob();
+  const disposition = response.headers.get("Content-Disposition") || "";
+  return {
+    blob,
+    fileName: extractFileNameFromDisposition(disposition, savedName || "resume.docx"),
+  };
+}
+
+export async function exportResumeImageWord(payload) {
+  let response;
+
+  try {
+    response = await fetch(`${API_BASE_URL}/api/resume/image/ocr-word`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    throw new Error(toUserFacingNetworkMessage(error));
+  }
+
+  if (!response.ok) {
+    throw new Error(await parseExportError(response));
+  }
+
+  const blob = await response.blob();
+  const disposition = response.headers.get("Content-Disposition") || "";
+  const savedName = response.headers.get("X-Generated-Document-Name") || "";
+  return {
+    blob,
+    fileName: extractFileNameFromDisposition(disposition, "resume-image-ocr.docx"),
+    savedName,
+    download_url: savedName ? toApiUrl(`/api/resume/image/ocr-word/${encodeURIComponent(savedName)}`) : "",
+    blockCount: Number(response.headers.get("X-OCR-Block-Count") || 0),
+    lowConfidenceCount: Number(response.headers.get("X-OCR-Low-Confidence-Count") || 0),
+  };
+}
+
+export async function downloadResumeImageWord(savedName) {
+  const encodedName = encodeURIComponent(savedName || "");
+  let response;
+
+  try {
+    response = await fetch(`${API_BASE_URL}/api/resume/image/ocr-word/${encodedName}`);
+  } catch (error) {
+    throw new Error(toUserFacingNetworkMessage(error));
+  }
+
+  if (!response.ok) {
+    throw new Error(await parseExportError(response));
+  }
+
+  const blob = await response.blob();
+  const disposition = response.headers.get("Content-Disposition") || "";
+  return {
+    blob,
+    fileName: extractFileNameFromDisposition(disposition, savedName || "resume-image-ocr.docx"),
+  };
 }
 
 export async function scoreSemanticAts(payload) {

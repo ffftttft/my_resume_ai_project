@@ -4,8 +4,10 @@ frontend/dist/
 frontend_app/node_modules/
 frontend_app/dist/
 frontend_app/.npm-cache/
+.local_tools/
 backend/uploads/*
 !backend/uploads/.gitkeep
+backend/generated/
 backend/__pycache__/
 backend/app/__pycache__/
 backend/app/routers/__pycache__/
@@ -33,3 +35,6 @@ profile_memory.json
 tmp_*.html
 tmp_*.js
 backend/data/chroma/
+*.log
+/*.docx
+output/

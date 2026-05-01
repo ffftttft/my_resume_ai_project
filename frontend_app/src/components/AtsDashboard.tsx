@@ -20,6 +20,11 @@ type AtsDashboardProps = {
   emptyStateCopy?: string;
 };
 
+function formatWeight(value: number | undefined) {
+  if (typeof value !== "number" || Number.isNaN(value)) return "";
+  return `${Math.round(value * 100)}%`;
+}
+
 function getScoreTone(score: number) {
   if (score >= 81) {
     return {
@@ -175,6 +180,37 @@ export default function AtsDashboard({
       ) : null}
 
       {meta?.warning ? <p className="ats-dashboard__warning">{meta.warning}</p> : null}
+
+      {result?.scoreBreakdown?.length ? (
+        <div className="ats-dashboard__breakdown" aria-label="ATS 评分维度">
+          {result.scoreBreakdown.map((item) => (
+            <div key={item.key} className="ats-dashboard__breakdown-item">
+              <div className="ats-dashboard__breakdown-head">
+                <span>{item.label}</span>
+                <strong>{Math.round(item.score)}</strong>
+              </div>
+              <div className="ats-dashboard__breakdown-track" aria-hidden="true">
+                <motion.span
+                  initial={{ width: 0 }}
+                  animate={{ width: `${Math.max(0, Math.min(100, item.score))}%` }}
+                  transition={{ duration: 0.7, ease: "easeOut" }}
+                />
+              </div>
+              <p>权重 {formatWeight(item.weight)}</p>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {result?.riskFlags?.length ? (
+        <div className="ats-dashboard__risk-row">
+          {result.riskFlags.slice(0, 4).map((flag) => (
+            <span key={flag} className="chip chip--negative">
+              {flag}
+            </span>
+          ))}
+        </div>
+      ) : null}
 
       <div className="ats-dashboard__grid">
         <section className="ats-dashboard__score-panel">

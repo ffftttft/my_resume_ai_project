@@ -1,6 +1,8 @@
 import React from "react";
 
+import AvatarUploadField from "./AvatarUploadField";
 import JobTargetSection from "./JobTargetSection";
+import ResumeTemplateSelector from "./ResumeTemplateSelector";
 import UploadDropZone from "./UploadDropZone";
 
 function TextArea({ value, onChange, placeholder, rows = 14 }) {
@@ -24,17 +26,32 @@ export default function ExistingResumePanel({
   jobInfoReady,
   resumeSourceText,
   resumeSourceName,
+  avatar,
   additionalAnswerCount,
   onResumeSourceChange,
   onUploadResumeFile,
+  onAvatarUpload,
+  onClearAvatar,
   onClearInfo,
   onBack,
   hasPendingQuestions,
   onOpenQuestions,
+  templates = [],
+  selectedTemplateId = "",
+  onSelectTemplate,
   sectionIds = {},
 }) {
   return (
     <div className="subpage-flow">
+      <ResumeTemplateSelector
+        id={sectionIds.template}
+        title="简历文件模板"
+        subtitle="先确定最终文件模板，再按模板容量优化原始简历，减少后续版式溢出。"
+        templates={templates}
+        selectedTemplateId={selectedTemplateId}
+        onSelectTemplate={onSelectTemplate}
+      />
+
       <JobTargetSection
         id={sectionIds.jobTarget}
         jobInfo={jobInfo}
@@ -94,6 +111,25 @@ export default function ExistingResumePanel({
             <strong className="entry-metric__value">{additionalAnswerCount}</strong>
           </div>
         </div>
+      </section>
+
+      <section id={sectionIds.avatar} className="paper-panel form-section-card p-6">
+        <div className="form-section-card__head">
+          <div>
+            <h3 className="form-section-card__title">个人头像</h3>
+            <p className="form-section-card__subtitle">
+              可选上传证件照或职业照，生成简历文件时会作为头像参考图。
+            </p>
+          </div>
+        </div>
+        <AvatarUploadField
+          avatar={avatar}
+          disabled={loading}
+          onUpload={onAvatarUpload}
+          onClear={onClearAvatar}
+          title="头像参考图"
+          description="与模板和简历正文一起传给 Image2，不会写入简历正文。"
+        />
       </section>
 
       <section id={sectionIds.source} className="paper-panel form-section-card p-6">

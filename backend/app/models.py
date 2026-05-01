@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from datetime import date, datetime
-from typing import Dict, List, Literal
+from typing import Any, Dict, List, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
@@ -228,6 +228,21 @@ class ProjectItem(StrictApiModel):
         return self
 
 
+class AwardItem(StrictApiModel):
+    """Award, scholarship, competition, certificate, or honor record."""
+
+    award_name: str = Field(default="", examples=["校级奖学金"])
+    date: str = Field(default="", examples=["2025-06"])
+    level: str = Field(default="", examples=["校级"])
+    issuer: str = Field(default="", examples=["示例大学"])
+    description: str = Field(default="", examples=["成绩排名靠前，或在竞赛中完成核心分析工作。"])
+
+    @field_validator("date")
+    @classmethod
+    def validate_date(cls, value: str) -> str:
+        return _normalize_month_text(value, "获奖时间")
+
+
 class ClarificationAnswer(StrictApiModel):
     """Answer to an AI-generated clarification question."""
 
@@ -243,8 +258,9 @@ class UserProfile(StrictApiModel):
     education: List[EducationItem] = Field(default_factory=list)
     experiences: List[ExperienceItem] = Field(default_factory=list)
     projects: List[ProjectItem] = Field(default_factory=list)
+    awards: List[AwardItem] = Field(default_factory=list)
     modules: List[str] = Field(
-        default_factory=lambda: ["summary", "skills", "education", "projects", "experience"]
+        default_factory=lambda: ["summary", "skills", "education", "projects", "experience", "awards"]
     )
     membership_level: Literal["basic", "advanced"] = "basic"
     use_full_information: bool = False
@@ -256,6 +272,7 @@ class GenerateResumeRequest(StrictApiModel):
     """Example request for /api/resume/generate."""
 
     profile: UserProfile
+    template_id: str = Field(default="", examples=["state-owned-general"])
 
     model_config = ConfigDict(
         extra="forbid",
@@ -277,7 +294,8 @@ class GenerateResumeRequest(StrictApiModel):
                     "education": [],
                     "experiences": [],
                     "projects": [],
-                    "modules": ["summary", "skills", "projects", "experience"],
+                    "awards": [],
+                    "modules": ["summary", "skills", "projects", "experience", "awards"],
                     "membership_level": "basic",
                     "use_full_information": False,
                     "uploaded_context": "",
@@ -315,6 +333,13 @@ class SaveWorkspaceRequest(StrictApiModel):
 
     form_state: Dict = Field(default_factory=dict)
     source: Literal["manual", "autosave"] = "manual"
+    active_board: str = "greenfield"
+    greenfield_workspace: Dict[str, Any] = Field(default_factory=dict)
+    existing_form_state: Dict[str, Any] = Field(default_factory=dict)
+    existing_resume_workspace: Dict[str, Any] = Field(default_factory=dict)
+    resume_image_state: Dict[str, Any] = Field(default_factory=dict)
+    selected_resume_template_id: str = ""
+    resume_image_model: str = ""
 
 
 class DeleteSnapshotRequest(StrictApiModel):
@@ -352,6 +377,7 @@ class ExistingResumeOptimizeRequest(StrictApiModel):
     job_requirements: str = Field(default="", examples=["熟悉 Python、MySQL、接口设计和性能优化"])
     instruction: str = Field(default="", examples=["更突出后端工程化和性能优化成果"])
     additional_answers: List[ClarificationAnswer] = Field(default_factory=list)
+    template_id: str = Field(default="", examples=["state-owned-general"])
 
     @field_validator("target_company", "target_role", "job_requirements")
     @classmethod
@@ -401,6 +427,58 @@ class SaveResumeSnapshotRequest(StrictApiModel):
     resume_text: str = Field(default="", examples=["张三\n后端开发工程师\n..."])
     generation_mode: str = Field(default="manual_preserve", examples=["manual_preserve"])
     analysis_notes: List[str] = Field(default_factory=list, examples=[["优先补强量化结果。"]])
+    board: str = Field(default="", examples=["greenfield"])
+    workspace: Dict[str, Any] = Field(default_factory=dict)
+    form_state: Dict[str, Any] = Field(default_factory=dict)
+    image_generation: Dict[str, Any] = Field(default_factory=dict)
+    resume_image_page_open: bool = False
+
+
+class ResumeImageGenerateRequest(StrictApiModel):
+    """Generate an A4 resume image from resume text, template, and optional avatar."""
+
+    resume_text: str = Field(default="", examples=["# 张三\n\n## 项目经历\n- ..."])
+    template_id: str = Field(default="state-owned-general", examples=["state-owned-general"])
+    avatar_saved_name: str = Field(default="", examples=["avatar.png"])
+    model: Literal["gpt-image-2", "gpt-image-2pro"] = "gpt-image-2"
+    board: str = Field(default="", examples=["greenfield"])
+
+    @field_validator("resume_text")
+    @classmethod
+    def validate_resume_text(cls, value: str, info: ValidationInfo) -> str:
+        return _validate_required_text(value, info.field_name)
+
+
+class ResumeFileGenerateRequest(StrictApiModel):
+    """Generate a DOCX-template-based resume file and image preview."""
+
+    resume_text: str = Field(default="", examples=["# 张三\n\n## 项目经历\n- ..."])
+    template_id: str = Field(default="state-owned-general", examples=["state-owned-general"])
+    avatar_saved_name: str = Field(default="", examples=["avatar.png"])
+    board: str = Field(default="", examples=["greenfield"])
+    file_name: str = Field(default="", examples=["zhangsan-resume"])
+    structured_resume: Dict[str, Any] = Field(default_factory=dict)
+    form_state: Dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("resume_text")
+    @classmethod
+    def validate_resume_text(cls, value: str, info: ValidationInfo) -> str:
+        return _validate_required_text(value, info.field_name)
+
+
+class ResumeImageOcrWordRequest(StrictApiModel):
+    """Export editable Word text by OCR-ing a generated resume image."""
+
+    image_saved_name: str = Field(default="", examples=["generated-resume.png"])
+    file_name: str = Field(default="resume-image-ocr", examples=["zhangsan_resume_ocr"])
+
+    @field_validator("image_saved_name")
+    @classmethod
+    def validate_image_saved_name(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("image_saved_name cannot be empty.")
+        return trimmed
 
 
 class ApiEnvelope(StrictApiModel):

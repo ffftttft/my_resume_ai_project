@@ -27,7 +27,7 @@ export default function ResumePreview({
           </h2>
           <div className="mt-3 flex flex-wrap gap-2">
             <span className="chip accent-chip">
-              {generationMode === "openai" ? "AI模式" : "本地兜底模式"}
+              {["openai", "deepseek"].includes(generationMode) ? "AI模式" : "本地兜底模式"}
             </span>
             <span className="chip">{resumeText ? "当前简历可直接编辑" : "尚未生成内容"}</span>
           </div>

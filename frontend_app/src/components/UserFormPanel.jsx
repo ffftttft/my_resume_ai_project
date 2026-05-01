@@ -1,7 +1,9 @@
 import React from "react";
 
 import DateInput from "./DateInput";
+import AvatarUploadField from "./AvatarUploadField";
 import JobTargetSection from "./JobTargetSection";
+import ResumeTemplateSelector from "./ResumeTemplateSelector";
 import UploadDropZone from "./UploadDropZone";
 import { calculateAge, validateBirthDate, validateMonthRange } from "../lib/date-utils";
 
@@ -11,6 +13,7 @@ const MODULE_OPTIONS = [
   { value: "education", label: "教育经历" },
   { value: "projects", label: "项目经历" },
   { value: "experience", label: "工作/实习经历" },
+  { value: "awards", label: "获奖经历" },
   { value: "attachments", label: "附件摘要" },
 ];
 
@@ -178,12 +181,18 @@ export default function UserFormPanel({
   onSkillsTextChange,
   onToggleModule,
   onUploadFiles,
+  avatar,
+  onAvatarUpload,
+  onClearAvatar,
   onListItemChange,
   onAddListItem,
   onRemoveListItem,
   onBack,
   hasPendingQuestions,
   onOpenQuestions,
+  templates = [],
+  selectedTemplateId = "",
+  onSelectTemplate,
   sectionIds = {},
 }) {
   const [touched, setTouched] = React.useState({});
@@ -196,8 +205,15 @@ export default function UserFormPanel({
   };
 
   return (
-    <div className="subpage-flow">
-      <JobTargetSection
+      <div className="subpage-flow">
+        <ResumeTemplateSelector
+          id={sectionIds.template}
+          templates={templates}
+          selectedTemplateId={selectedTemplateId}
+          onSelectTemplate={onSelectTemplate}
+        />
+
+        <JobTargetSection
         id={sectionIds.jobTarget}
         jobInfo={jobInfo}
         onFieldChange={onJobFieldChange}
@@ -287,6 +303,15 @@ export default function UserFormPanel({
       </SectionCard>
 
       <SectionCard id={sectionIds.profile} title="个人资料" subtitle="填写基础信息与个人概述。">
+        <AvatarUploadField
+          avatar={avatar}
+          disabled={loading}
+          onUpload={onAvatarUpload}
+          onClear={onClearAvatar}
+          title="个人头像"
+            description="上传证件照或职业照，生成简历文件时会放入模板照片位置。"
+        />
+
         <div className="grid gap-4 md:grid-cols-2">
           <Field label="姓名">
             <TextInput name="full_name" value={formState.basic_info.name} onChange={(value) => onBasicInfoChange("name", value)} placeholder="例如：张三" />
@@ -341,12 +366,6 @@ export default function UserFormPanel({
             <p className="toggle-card__description">开启后会尽量保留更多背景细节与补充信息。</p>
           </div>
         </label>
-      </SectionCard>
-
-      <SectionCard id={sectionIds.skills} title="技能" subtitle="支持逗号或换行分隔。">
-        <Field label="技能清单">
-          <TextArea value={formState.skills_text} onChange={onSkillsTextChange} placeholder="Python, FastAPI, MySQL, React, Docker" rows={4} />
-        </Field>
       </SectionCard>
 
       <SectionCard
@@ -487,6 +506,74 @@ export default function UserFormPanel({
             <AttachmentField item={item} listKey="experiences" index={index} onUploadFiles={onUploadFiles} loading={loading} />
           </div>
         ))}
+      </SectionCard>
+
+      <SectionCard
+        id={sectionIds.awards}
+        title="获奖经历"
+        subtitle="记录奖项名称、获奖年月、等级和颁发/主办方。"
+        action={
+          <button type="button" onClick={() => onAddListItem("awards")} className="mini-outline-button">
+            添加获奖
+          </button>
+        }
+      >
+        {formState.awards.map((item, index) => (
+          <div key={`award-${index}`} className="form-stack-card">
+            <div className="form-stack-card__head">
+              <p className="form-stack-card__title">获奖经历 #{index + 1}</p>
+              {formState.awards.length > 1 ? (
+                <RemoveButton onClick={() => onRemoveListItem("awards", index)} />
+              ) : null}
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field label="获奖名称">
+                <TextInput
+                  value={item.award_name}
+                  onChange={(value) => onListItemChange("awards", index, "award_name", value)}
+                  placeholder="校级奖学金"
+                />
+              </Field>
+              <Field label="获奖时间" hint="年月即可">
+                <DateInput
+                  name="award_date"
+                  mode="month"
+                  value={item.date}
+                  onChange={(value) => onListItemChange("awards", index, "date", value)}
+                  placeholder="2025-06"
+                />
+              </Field>
+              <Field label="获奖等级">
+                <TextInput
+                  value={item.level}
+                  onChange={(value) => onListItemChange("awards", index, "level", value)}
+                  placeholder="省级二等奖 / 校级优秀奖学金"
+                />
+              </Field>
+              <Field label="颁发/主办方">
+                <TextInput
+                  value={item.issuer}
+                  onChange={(value) => onListItemChange("awards", index, "issuer", value)}
+                  placeholder="示例大学 / 主办方"
+                />
+              </Field>
+            </div>
+            <Field label="补充说明">
+              <TextArea
+                value={item.description}
+                onChange={(value) => onListItemChange("awards", index, "description", value)}
+                placeholder="成绩排名靠前，或在竞赛中完成核心分析工作。"
+                rows={3}
+              />
+            </Field>
+          </div>
+        ))}
+      </SectionCard>
+
+      <SectionCard id={sectionIds.skills} title="技能" subtitle="支持逗号或换行分隔。">
+        <Field label="技能清单">
+          <TextArea value={formState.skills_text} onChange={onSkillsTextChange} placeholder="Python, FastAPI, MySQL, React, Docker" rows={4} />
+        </Field>
       </SectionCard>
     </div>
   );

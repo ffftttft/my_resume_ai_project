@@ -86,7 +86,7 @@ export default function ExistingResumePreview({
           </div>
 
           <div className="preview-stage__chips">
-            <span className="chip">{generationMode === "openai" ? "AI 优化" : "本地兜底"}</span>
+            <span className="chip">{["openai", "deepseek"].includes(generationMode) ? "AI 优化" : "本地兜底"}</span>
             <span className={`chip ${hasResume ? "accent-chip" : ""}`}>
               {hasResume ? "已生成结果" : "空白工作区"}
             </span>

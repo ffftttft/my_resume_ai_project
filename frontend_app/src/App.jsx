@@ -4,10 +4,17 @@ import {
   deleteExportRecord,
   deleteResumeSnapshot,
   deleteUploadedFileRecord,
+  downloadResumeFile,
+  downloadResumeImageWord,
+  exportResumeImageWord,
   exportResumeFile,
+  fetchResumeFileTemplates,
   fetchHealth,
   fetchMemory,
   fetchModelStatus,
+  fetchResumeImageTemplates,
+  generateResumeFile,
+  generateResumeImage,
   optimizeExistingResume,
   previewUploadedFile,
   reviseResume,
@@ -17,6 +24,7 @@ import {
   searchRagReferences,
   scoreSemanticAts,
   saveWorkspaceDraft,
+  uploadAvatar,
   uploadFiles,
 } from "./api";
 import {
@@ -33,6 +41,7 @@ import LiveJsonModal from "./components/LiveJsonModal";
 import ModeSelectionDialog from "./components/ModeSelectionDialog";
 import QuestionCard from "./components/QuestionCard";
 import RecordPreviewDialog from "./components/RecordPreviewDialog";
+import ResumeImagePanel from "./components/ResumeImagePanel";
 import ResumeWorkbenchPreview from "./components/ResumeWorkbenchPreview";
 import UserFormPanel from "./components/UserFormPanel";
 import WorkspaceHistoryDrawer from "./components/WorkspaceHistoryDrawer";
@@ -81,8 +90,26 @@ function createEmptyExperience() {
   };
 }
 
+function createEmptyAward() {
+  return {
+    award_name: "",
+    date: "",
+    level: "",
+    issuer: "",
+    description: "",
+  };
+}
+
 function cloneFormState(value) {
   return JSON.parse(JSON.stringify(value));
+}
+
+function clonePlainObject(value, fallback = {}) {
+  try {
+    return JSON.parse(JSON.stringify(value ?? fallback));
+  } catch {
+    return cloneFormState(fallback);
+  }
 }
 
 function createEmptyResumeWorkspace() {
@@ -104,7 +131,28 @@ function createEmptyExistingResumeInput() {
     job_requirements: "",
     resume_source_text: "",
     resume_source_name: "",
+    avatar: createEmptyAvatar(),
     additional_answers: [],
+  };
+}
+
+function createEmptyAvatar() {
+  return {
+    saved_name: "",
+    original_name: "",
+    preview_url: "",
+  };
+}
+
+function createEmptyResumeImageState() {
+  return {
+    status: "idle",
+    result: null,
+    word_result: null,
+    image_test_status: "idle",
+    image_test_result: null,
+    image_test_error: "",
+    error: "",
   };
 }
 
@@ -214,8 +262,14 @@ const BOARD_LABELS = Object.freeze({
 });
 
 function withAssignedMembershipLevel(formState) {
+  const cloned = cloneFormState(formState);
+  const modules = Array.isArray(cloned.modules) ? cloned.modules : INITIAL_GREENFIELD_FORM_STATE.modules;
+
   return {
-    ...cloneFormState(formState),
+    ...cloned,
+    avatar: cloned.avatar && typeof cloned.avatar === "object" ? cloned.avatar : createEmptyAvatar(),
+    awards: Array.isArray(cloned.awards) ? cloned.awards : [createEmptyAward()],
+    modules: modules.includes("awards") ? modules : [...modules, "awards"],
     membership_level: MOCK_ACCOUNT_ENTITLEMENTS.membership_level,
   };
 }
@@ -232,11 +286,13 @@ const INITIAL_GREENFIELD_FORM_STATE = {
     city: "",
     summary: "",
   },
+  avatar: createEmptyAvatar(),
   skills_text: "",
   education: [createEmptyEducation()],
   projects: [createEmptyProject()],
   experiences: [createEmptyExperience()],
-  modules: ["summary", "skills", "education", "projects", "experience", "attachments"],
+  awards: [createEmptyAward()],
+  modules: ["summary", "skills", "education", "projects", "experience", "awards", "attachments"],
   membership_level: MOCK_ACCOUNT_ENTITLEMENTS.membership_level,
   use_full_information: false,
   uploaded_context: "",
@@ -420,6 +476,18 @@ function toExperiencePayload(items) {
     });
 }
 
+function toAwardPayload(items) {
+  return (items || [])
+    .filter(hasContent)
+    .map((item) => ({
+      award_name: item.award_name.trim(),
+      date: normalizeMonthInput(item.date || ""),
+      level: item.level.trim(),
+      issuer: item.issuer.trim(),
+      description: item.description.trim(),
+    }));
+}
+
 function buildScopedAttachmentContext(formState) {
   return [...(formState.projects || []), ...(formState.experiences || [])]
     .map((item) => item.attachment_context || "")
@@ -444,12 +512,181 @@ function buildProfilePayload(formState) {
     education: toEducationPayload(formState.education),
     projects: toProjectPayload(formState.projects),
     experiences: toExperiencePayload(formState.experiences),
+    awards: toAwardPayload(formState.awards),
     modules: formState.modules.length > 0 ? formState.modules : ["summary"],
     membership_level: formState.membership_level,
     use_full_information: formState.use_full_information,
     uploaded_context: buildScopedAttachmentContext(formState),
     additional_answers: (formState.additional_answers || []).filter((item) => item?.answer?.trim()),
   };
+}
+
+function hasStructuredResume(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const contact = value.contact && typeof value.contact === "object" ? value.contact : {};
+  return Boolean(
+    Object.values(contact).some((item) => String(item || "").trim()) ||
+      String(value.summary || "").trim() ||
+      (Array.isArray(value.education) && value.education.length > 0) ||
+      (Array.isArray(value.experience) && value.experience.length > 0) ||
+      (Array.isArray(value.projects) && value.projects.length > 0) ||
+      (Array.isArray(value.awards) && value.awards.length > 0) ||
+      (Array.isArray(value.skills) && value.skills.length > 0),
+  );
+}
+
+function buildStructuredResumeFromGreenfieldForm(formState = {}) {
+  if (!formState?.basic_info) {
+    return null;
+  }
+  const profile = buildProfilePayload({
+    ...INITIAL_GREENFIELD_FORM_STATE,
+    ...formState,
+    basic_info: {
+      ...INITIAL_GREENFIELD_FORM_STATE.basic_info,
+      ...(formState.basic_info || {}),
+    },
+    education: formState.education || [],
+    projects: formState.projects || [],
+    experiences: formState.experiences || [],
+    awards: formState.awards || [],
+    modules: formState.modules || INITIAL_GREENFIELD_FORM_STATE.modules,
+  });
+
+  return {
+    contact: {
+      full_name: profile.basic_info.name,
+      birth_date: profile.basic_info.birth_date,
+      email: profile.basic_info.email,
+      phone: profile.basic_info.phone,
+      city: profile.basic_info.city,
+      target_company: profile.basic_info.target_company,
+      target_role: profile.basic_info.target_role,
+    },
+    education: profile.education.map((item) => ({
+      school_name: item.school,
+      degree: item.degree,
+      major: item.major,
+      start_date: item.start_date,
+      end_date: item.end_date,
+      highlights: item.highlights,
+    })),
+    experience: profile.experiences.map((item) => ({
+      company_name: item.company,
+      job_title: item.role,
+      start_date: item.start_date,
+      end_date: item.end_date,
+      achievements: item.highlights,
+    })),
+    projects: profile.projects.map((item) => ({
+      project_name: item.name,
+      role: item.role,
+      start_date: item.start_date,
+      end_date: item.end_date,
+      project_summary: item.description,
+      achievements: item.highlights,
+    })),
+    awards: profile.awards,
+    skills: profile.skills.length > 0 ? [{ category: "技能", items: profile.skills }] : [],
+    summary: profile.basic_info.summary,
+  };
+}
+
+function parseStructuredResumeFromText(resumeText = "", formState = {}) {
+  const lines = String(resumeText || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length === 0) {
+    return null;
+  }
+
+  const contact = {};
+  const titleLine = lines.find((line) => line.startsWith("#")) || lines[0] || "";
+  const titleParts = titleLine.replace(/^#+\s*/, "").split(/\s*[·•|｜-]\s*/).filter(Boolean);
+  if (titleParts[0]) contact.full_name = titleParts[0].trim();
+  if (titleParts[1]) contact.target_role = titleParts[1].trim();
+
+  const basic = formState?.basic_info || formState || {};
+  contact.full_name = contact.full_name || basic.name || "";
+  contact.target_company = basic.target_company || "";
+  contact.target_role = contact.target_role || basic.target_role || "";
+  contact.email = basic.email || "";
+  contact.phone = basic.phone || "";
+  contact.city = basic.city || "";
+
+  const sectionBuckets = {};
+  let currentSection = "";
+  lines.forEach((line) => {
+    const heading = line.replace(/^#+\s*/, "").trim();
+    if (/个人信息|基本信息/.test(heading)) currentSection = "contact";
+    else if (/教育/.test(heading)) currentSection = "education";
+    else if (/实习|工作/.test(heading)) currentSection = "experience";
+    else if (/项目/.test(heading)) currentSection = "projects";
+    else if (/获奖|荣誉/.test(heading)) currentSection = "awards";
+    else if (/技能|证书/.test(heading)) currentSection = "skills";
+    else if (/总结|评价|摘要/.test(heading)) currentSection = "summary";
+    else if (currentSection) {
+      sectionBuckets[currentSection] = [...(sectionBuckets[currentSection] || []), line.replace(/^[-•*]\s*/, "")];
+    }
+  });
+
+  (sectionBuckets.contact || []).forEach((line) => {
+    const match = line.match(/^([^：:]{2,8})[：:]\s*(.+)$/);
+    if (!match) return;
+    const [, label, value] = match;
+    if (/姓名/.test(label)) contact.full_name = value;
+    if (/邮箱/.test(label)) contact.email = value;
+    if (/电话|手机/.test(label)) contact.phone = value;
+    if (/城市/.test(label)) contact.city = value;
+    if (/目标公司/.test(label)) contact.target_company = value;
+    if (/目标岗位|意向岗位/.test(label)) contact.target_role = value;
+  });
+
+  const toSingleEntry = (items, fallbackTitle) => {
+    if (!items?.length) return [];
+    const [first, ...rest] = items;
+    return [
+      {
+        project_name: first,
+        company_name: first,
+        school_name: first,
+        job_title: fallbackTitle,
+        role: fallbackTitle,
+        achievements: rest,
+        highlights: rest,
+      },
+    ];
+  };
+
+  return {
+    contact,
+    education: toSingleEntry(sectionBuckets.education, "教育经历"),
+    experience: toSingleEntry(sectionBuckets.experience, "实习经历"),
+    projects: toSingleEntry(sectionBuckets.projects, "项目经历"),
+    awards: (sectionBuckets.awards || []).map((item) => ({ award_name: item })),
+    skills: (sectionBuckets.skills || []).length > 0 ? [{ category: "技能", items: sectionBuckets.skills }] : [],
+    summary: (sectionBuckets.summary || []).join(" "),
+  };
+}
+
+function inferStructuredResumeFromSnapshot(snapshot, board, restoredText) {
+  if (hasStructuredResume(snapshot?.workspace?.structured_resume)) {
+    return snapshot.workspace.structured_resume;
+  }
+  if (hasStructuredResume(snapshot?.structured_resume)) {
+    return snapshot.structured_resume;
+  }
+  if (board === "greenfield" && snapshot?.form_state?.basic_info) {
+    const fromForm = buildStructuredResumeFromGreenfieldForm(snapshot.form_state);
+    if (hasStructuredResume(fromForm)) {
+      return fromForm;
+    }
+  }
+  const parsed = parseStructuredResumeFromText(restoredText, snapshot?.form_state || {});
+  return hasStructuredResume(parsed) ? parsed : null;
 }
 
 function slugifyFileName(title) {
@@ -468,6 +705,74 @@ function downloadBlob(blob, fileName) {
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
+function isFilePickerCancel(error) {
+  return error?.name === "AbortError" || /aborted|cancel/i.test(error?.message || "");
+}
+
+function getFilePickerType(fileName, mimeType) {
+  const suffix = `.${String(fileName || "").split(".").pop() || ""}`.toLowerCase();
+  if (suffix === ".md") {
+    return {
+      description: "Markdown 文档",
+      accept: { "text/markdown": [".md"] },
+    };
+  }
+  if (suffix === ".txt") {
+    return {
+      description: "TXT 文档",
+      accept: { "text/plain": [".txt"] },
+    };
+  }
+  if (suffix === ".docx") {
+    return {
+      description: "Word document",
+      accept: {
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
+      },
+    };
+  }
+  if ([".jpg", ".jpeg"].includes(suffix)) {
+    return {
+      description: "JPEG 图片",
+      accept: { "image/jpeg": [".jpg", ".jpeg"] },
+    };
+  }
+  return {
+    description: "PNG 图片",
+    accept: { [mimeType || "image/png"]: [".png"] },
+  };
+}
+
+async function saveBlobToUserPath(blob, fileName) {
+  const saveTarget = await createSaveTarget(fileName, blob.type);
+  await saveTarget.write(blob);
+  return { saved: true, fileName, usedPicker: saveTarget.usedPicker };
+}
+
+async function createSaveTarget(fileName, mimeType) {
+  if (window.showSaveFilePicker) {
+    const handle = await window.showSaveFilePicker({
+      suggestedName: fileName,
+      types: [getFilePickerType(fileName, mimeType)],
+    });
+    return {
+      fileName,
+      usedPicker: true,
+      write: async (blob) => {
+        const writable = await handle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+      },
+    };
+  }
+
+  return {
+    fileName,
+    usedPicker: false,
+    write: async (blob) => downloadBlob(blob, fileName),
+  };
+}
+
 function truncateText(value, maxLength = 96) {
   const normalized = (value || "").replace(/\s+/g, " ").trim();
   if (!normalized) return "";
@@ -479,10 +784,30 @@ function buildResumeSnapshotTitle(targetCompany, targetRole) {
   return [targetCompany?.trim(), targetRole?.trim()].filter(Boolean).join(" - ");
 }
 
-function buildWorkspaceDraftPayload({ formState, source = "manual" }) {
+function buildWorkspaceDraftPayload({
+  formState,
+  source = "manual",
+  activeBoard = "greenfield",
+  greenfieldWorkspace = createEmptyResumeWorkspace(),
+  existingFormState = createEmptyExistingResumeInput(),
+  existingResumeWorkspace = createEmptyResumeWorkspace(),
+  resumeImageState = {},
+  selectedResumeTemplateId = "",
+  resumeImageModel = "gpt-image-2",
+}) {
   return {
     form_state: cloneFormState(formState),
     source,
+    active_board: activeBoard,
+    greenfield_workspace: clonePlainObject(greenfieldWorkspace, createEmptyResumeWorkspace()),
+    existing_form_state: clonePlainObject(existingFormState, createEmptyExistingResumeInput()),
+    existing_resume_workspace: clonePlainObject(existingResumeWorkspace, createEmptyResumeWorkspace()),
+    resume_image_state: clonePlainObject(resumeImageState, {
+      greenfield: createEmptyResumeImageState(),
+      existing_resume: createEmptyResumeImageState(),
+    }),
+    selected_resume_template_id: selectedResumeTemplateId,
+    resume_image_model: resumeImageModel,
   };
 }
 
@@ -591,6 +916,7 @@ function computeWeightedReadiness(segments) {
 export default function App() {
   const [activeBoard, setActiveBoard] = useState("greenfield");
   const [activeInfoPage, setActiveInfoPage] = useState(null);
+  const [resumeImagePageOpen, setResumeImagePageOpen] = useState(false);
   const [modeDialogOpen, setModeDialogOpen] = useState(false);
   const [greenfieldFormState, setGreenfieldFormState] = useState(() =>
     cloneFormState(INITIAL_GREENFIELD_FORM_STATE),
@@ -610,6 +936,13 @@ export default function App() {
   const [questionFlowMode, setQuestionFlowMode] = useState("greenfield");
   const [modelStatus, setModelStatus] = useState(null);
   const [modelStatusLoading, setModelStatusLoading] = useState(false);
+  const [resumeImageTemplates, setResumeImageTemplates] = useState([]);
+  const [selectedResumeTemplateId, setSelectedResumeTemplateId] = useState("");
+  const [resumeImageModel, setResumeImageModel] = useState("gpt-image-2");
+  const [resumeImageState, setResumeImageState] = useState(() => ({
+    greenfield: createEmptyResumeImageState(),
+    existing_resume: createEmptyResumeImageState(),
+  }));
   const [draftSaving, setDraftSaving] = useState(false);
   const [draftSaveStatus, setDraftSaveStatus] = useState("");
   const [workspaceReady, setWorkspaceReady] = useState(false);
@@ -929,6 +1262,7 @@ export default function App() {
     setHistoryDrawerOpen(false);
     setActiveBoard(nextBoard);
     setActiveInfoPage(null);
+    setResumeImagePageOpen(false);
     setQuestionsOpen(false);
     closeRecordPreview();
     setStatusText(getBoardIntroStatus(nextBoard));
@@ -947,6 +1281,7 @@ export default function App() {
   function handleOpenInfoPage(board = activeBoard) {
     setActiveBoard(board);
     setActiveInfoPage(board);
+    setResumeImagePageOpen(false);
     setJsonModalOpen(false);
     setJobInsightDrawerOpen(false);
     setHistoryDrawerOpen(false);
@@ -956,6 +1291,25 @@ export default function App() {
 
   function handleCloseInfoPage() {
     setActiveInfoPage(null);
+  }
+
+  function handleOpenResumeImagePage() {
+    if (!activeWorkspace.resume_text.trim()) {
+      setStatusText("请先生成或编辑简历正文，再进入简历文件生成页。");
+      return;
+    }
+
+    setActiveInfoPage(null);
+    setResumeImagePageOpen(true);
+    setJsonModalOpen(false);
+    setJobInsightDrawerOpen(false);
+    setHistoryDrawerOpen(false);
+    setQuestionsOpen(false);
+    closeRecordPreview();
+  }
+
+  function handleCloseResumeImagePage() {
+    setResumeImagePageOpen(false);
   }
 
   function applyGenericJobInfo(board = activeBoard) {
@@ -978,16 +1332,135 @@ export default function App() {
     setStatusText("已填入标准岗位模板，你仍可继续手动调整。");
   }
 
+  function getWorkspaceForBoard(board) {
+    return board === "existing_resume" ? existingResumeWorkspace : greenfieldWorkspace;
+  }
+
+  function getFormStateForBoard(board) {
+    return board === "existing_resume" ? existingFormState : greenfieldFormState;
+  }
+
+  function getJobInfoForBoard(board) {
+    return board === "existing_resume" ? existingFormState : greenfieldFormState.basic_info;
+  }
+
+  function normalizeRestoredImageState(value) {
+    if (!value || typeof value !== "object") {
+      return createEmptyResumeImageState();
+    }
+
+    return {
+      ...createEmptyResumeImageState(),
+      ...clonePlainObject(value, createEmptyResumeImageState()),
+      status: value.result?.preview_url ? value.status || "done" : value.status || "idle",
+      error: value.error || "",
+    };
+  }
+
+  function buildSnapshotPayload(board = activeBoard, overrides = {}) {
+    const workspace = overrides.workspace || getWorkspaceForBoard(board);
+    const jobInfo = overrides.jobInfo || getJobInfoForBoard(board);
+    const imageStateForBoard =
+      overrides.imageState || resumeImageState[board] || createEmptyResumeImageState();
+    const hasImageResult = Boolean(imageStateForBoard?.result?.preview_url);
+
+    return {
+      title: workspace.title || buildResumeSnapshotTitle(jobInfo.target_company, jobInfo.target_role),
+      target_company: jobInfo.target_company || "",
+      target_role: jobInfo.target_role || "",
+      resume_text: workspace.resume_text || "",
+      generation_mode: workspace.generation_mode || "manual_preserve",
+      analysis_notes: workspace.analysis_notes || [],
+      structured_resume: clonePlainObject(workspace.structured_resume, null),
+      contract_report: clonePlainObject(workspace.contract_report, null),
+      board,
+      workspace: clonePlainObject(workspace, createEmptyResumeWorkspace()),
+      form_state: clonePlainObject(getFormStateForBoard(board), {}),
+      image_generation: {
+        selected_template_id: overrides.selectedTemplateId ?? selectedResumeTemplateId,
+        model: overrides.imageModel ?? resumeImageModel,
+        state: clonePlainObject(imageStateForBoard, createEmptyResumeImageState()),
+      },
+      resume_image_page_open: hasImageResult || Boolean(overrides.resumeImagePageOpen),
+    };
+  }
+
+  async function persistCurrentSnapshot({ board = activeBoard, imageStateOverride = null, silent = true } = {}) {
+    const workspace = getWorkspaceForBoard(board);
+    if (!workspace.resume_text?.trim()) {
+      return null;
+    }
+
+    try {
+      const snapshot = await saveResumeSnapshot(
+        buildSnapshotPayload(board, {
+          imageState: imageStateOverride || resumeImageState[board] || createEmptyResumeImageState(),
+          resumeImagePageOpen: Boolean(
+            (imageStateOverride || resumeImageState[board])?.result?.preview_url,
+          ),
+        }),
+      );
+      await refreshMemory();
+      return snapshot;
+    } catch (error) {
+      if (!silent) {
+        setStatusText(`保存历史快照失败：${error.message}`);
+      }
+      return null;
+    }
+  }
+
   function createCurrentWorkspaceDraft(source = "manual") {
     return buildWorkspaceDraftPayload({
       formState: greenfieldFormState,
       source,
+      activeBoard,
+      greenfieldWorkspace,
+      existingFormState,
+      existingResumeWorkspace,
+      resumeImageState,
+      selectedResumeTemplateId,
+      resumeImageModel,
     });
   }
 
-  function restoreWorkspaceDraft(draft) {
+  function restoreWorkspaceDraft(draft, options = {}) {
     if (!draft?.form_state) return;
+    const includeResults = options.includeResults !== false;
     setGreenfieldFormState(withAssignedMembershipLevel(draft.form_state));
+    if (includeResults && draft.greenfield_workspace) {
+      setGreenfieldWorkspace({
+        ...createEmptyResumeWorkspace(),
+        ...clonePlainObject(draft.greenfield_workspace, createEmptyResumeWorkspace()),
+      });
+    }
+    if (draft.existing_form_state) {
+      setExistingFormState({
+        ...createEmptyExistingResumeInput(),
+        ...clonePlainObject(draft.existing_form_state, createEmptyExistingResumeInput()),
+      });
+    }
+    if (includeResults && draft.existing_resume_workspace) {
+      setExistingResumeWorkspace({
+        ...createEmptyResumeWorkspace(),
+        ...clonePlainObject(draft.existing_resume_workspace, createEmptyResumeWorkspace()),
+      });
+    }
+    if (includeResults && draft.resume_image_state) {
+      setResumeImageState({
+        greenfield: normalizeRestoredImageState(draft.resume_image_state.greenfield),
+        existing_resume: normalizeRestoredImageState(draft.resume_image_state.existing_resume),
+      });
+    }
+    if (draft.selected_resume_template_id) {
+      setSelectedResumeTemplateId(draft.selected_resume_template_id);
+    }
+    if (draft.resume_image_model) {
+      setResumeImageModel(draft.resume_image_model);
+    }
+    if (draft.active_board) {
+      setActiveBoard(draft.active_board === "existing_resume" ? "existing_resume" : "greenfield");
+    }
   }
 
   async function persistWorkspaceDraft({ silent = false, source = "manual" } = {}) {
@@ -1073,6 +1546,7 @@ export default function App() {
         latency_ms: null,
         sample_output: "",
         error: error.message,
+        image_generation: {},
       });
     } finally {
       if (!silent) {
@@ -1135,20 +1609,31 @@ export default function App() {
         const sessionPayload = await resetAiSession();
         setSessionUsername(sessionPayload.username || "ft");
 
-        const [health, memoryPayload] = await Promise.all([fetchHealth(), fetchMemory()]);
+        const [health, memoryPayload, templatePayload] = await Promise.all([
+          fetchHealth(),
+          fetchMemory(),
+          fetchResumeFileTemplates().catch(() => fetchResumeImageTemplates().catch(() => [])),
+        ]);
+        const templates = Array.isArray(templatePayload) ? templatePayload : templatePayload.templates || [];
         setBackendStatus(health);
         setMemory(memoryPayload.memory);
+        setResumeImageTemplates(templates);
+        setSelectedResumeTemplateId(
+          templatePayload.default_template_id ||
+            templates.find((template) => template.is_default)?.id ||
+            templates[0]?.id ||
+            "",
+        );
         setStatusText("本地服务已连接，当前工作区已就绪。");
 
         const savedDraft = memoryPayload.memory?.workspace_draft;
         if (savedDraft?.form_state) {
           const restoredDraftFormState = withAssignedMembershipLevel(savedDraft.form_state);
-          restoreWorkspaceDraft(savedDraft);
+          restoreWorkspaceDraft(savedDraft, { includeResults: false });
           lastSavedDraftHashRef.current = JSON.stringify({
-            ...buildWorkspaceDraftPayload({
-              formState: restoredDraftFormState,
-            }),
+            ...savedDraft,
             source: undefined,
+            saved_at: undefined,
           });
           setDraftSaveStatus(
             savedDraft.saved_at
@@ -1175,6 +1660,7 @@ export default function App() {
             latency_ms: null,
             sample_output: "",
             error: monitorError.message,
+            image_generation: {},
           });
         }
       } catch (error) {
@@ -1214,7 +1700,18 @@ export default function App() {
     }, WORKSPACE_AUTOSAVE_MS);
 
     return () => window.clearInterval(timer);
-  }, [backendStatus, greenfieldFormState, workspaceReady]);
+  }, [
+    activeBoard,
+    backendStatus,
+    existingFormState,
+    existingResumeWorkspace,
+    greenfieldFormState,
+    greenfieldWorkspace,
+    resumeImageModel,
+    resumeImageState,
+    selectedResumeTemplateId,
+    workspaceReady,
+  ]);
 
   useEffect(() => {
     const resumeText = activeBoard === "existing_resume"
@@ -1241,10 +1738,11 @@ export default function App() {
 
     let cancelled = false;
     const timer = window.setTimeout(async () => {
-      setSemanticAtsState((previous) => ({
-        ...previous,
+      setSemanticAtsState({
         status: "loading",
-      }));
+        result: null,
+        warning: "",
+      });
 
       try {
         const result = await scoreSemanticAts({
@@ -1344,62 +1842,12 @@ export default function App() {
   ]);
 
   useEffect(() => {
-    const jobInfo = activeBoard === "existing_resume" ? existingFormState : greenfieldFormState.basic_info;
-    const targetCompany = jobInfo?.target_company?.trim() || "";
-    const targetRole = jobInfo?.target_role?.trim() || "";
-    const jobRequirements = jobInfo?.job_requirements?.trim() || "";
-
-    if (backendStatus?.status !== "ok" || !targetCompany || !targetRole) {
-      setJobInsightState({
-        status: "idle",
-        data: null,
-      });
-      return undefined;
-    }
-
-    let cancelled = false;
-    const timer = window.setTimeout(async () => {
-      setJobInsightState((previous) => ({
-        ...previous,
-        status: "loading",
-      }));
-
-      try {
-        const result = await searchJobContext({
-          target_company: targetCompany,
-          target_role: targetRole,
-          job_requirements: jobRequirements,
-          force_refresh: false,
-        });
-
-        if (cancelled) return;
-        setJobInsightState({
-          status: "ready",
-          data: result,
-        });
-      } catch (error) {
-        if (cancelled) return;
-        setJobInsightState({
-          status: "error",
-          data: {
-            query: [targetCompany, targetRole].filter(Boolean).join(" "),
-            provider: "tavily",
-            mode: "error",
-            cached: false,
-            results: [],
-            warning: error?.message || "岗位情报搜索失败，当前仅基于已填写岗位信息继续执行。",
-          },
-        });
-      }
-    }, 360);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
+    setJobInsightState({
+      status: "idle",
+      data: null,
+    });
   }, [
     activeBoard,
-    backendStatus?.status,
     existingFormState.target_company,
     existingFormState.target_role,
     existingFormState.job_requirements,
@@ -1440,6 +1888,8 @@ export default function App() {
         ? createEmptyEducation()
         : listKey === "projects"
           ? createEmptyProject()
+          : listKey === "awards"
+            ? createEmptyAward()
           : createEmptyExperience();
 
     setGreenfieldFormState((previous) => ({
@@ -1503,6 +1953,7 @@ export default function App() {
       const result = await generateGreenfieldResumeStream(
         {
           profile: buildProfilePayload(nextFormState),
+          template_id: selectedResumeTemplateId,
         },
         {
           signal: controller.signal,
@@ -1673,6 +2124,55 @@ export default function App() {
     }
   }
 
+  async function handleAvatarUpload(board, selectedFiles, inputElement) {
+    if (!selectedFiles || selectedFiles.length === 0) return;
+
+    const file = Array.from(selectedFiles)[0];
+    setLoadingAction("avatar");
+    try {
+      const result = await uploadAvatar(file);
+      const nextAvatar = {
+        saved_name: result.saved_name || "",
+        original_name: result.original_name || file.name || "",
+        preview_url: result.preview_url || "",
+      };
+
+      if (board === "existing_resume") {
+        setExistingFormState((previous) => ({
+          ...previous,
+          avatar: nextAvatar,
+        }));
+      } else {
+        setGreenfieldFormState((previous) => ({
+          ...previous,
+          avatar: nextAvatar,
+        }));
+      }
+
+      setStatusText("头像已上传，生成简历文件时会作为参考图使用。");
+    } catch (error) {
+      setStatusText(`头像上传失败：${error.message}`);
+    } finally {
+      if (inputElement) inputElement.value = "";
+      setLoadingAction("");
+    }
+  }
+
+  function handleClearAvatar(board) {
+    if (board === "existing_resume") {
+      setExistingFormState((previous) => ({
+        ...previous,
+        avatar: createEmptyAvatar(),
+      }));
+    } else {
+      setGreenfieldFormState((previous) => ({
+        ...previous,
+        avatar: createEmptyAvatar(),
+      }));
+    }
+    setStatusText("已清除当前头像引用。");
+  }
+
   async function runExistingResumeOptimize({
     resumeTextInput = existingFormState.resume_source_text,
     additionalAnswers = existingFormState.additional_answers,
@@ -1699,6 +2199,7 @@ export default function App() {
         job_requirements: existingFormState.job_requirements,
         instruction,
         additional_answers: additionalAnswers,
+        template_id: selectedResumeTemplateId,
       });
       applyResult(
         "existing_resume",
@@ -1776,6 +2277,7 @@ export default function App() {
           job_requirements: existingFormState.job_requirements,
           instruction: existingResumeWorkspace.revision_instruction || "",
           additional_answers: existingFormState.additional_answers || [],
+          template_id: selectedResumeTemplateId,
         },
         {
           signal: controller.signal,
@@ -1974,8 +2476,9 @@ export default function App() {
     restoreWorkspaceDraft(savedDraft);
     const restoredDraftFormState = withAssignedMembershipLevel(savedDraft.form_state);
     lastSavedDraftHashRef.current = JSON.stringify({
-      ...buildWorkspaceDraftPayload({ formState: restoredDraftFormState }),
+      ...savedDraft,
       source: undefined,
+      saved_at: undefined,
     });
     setDraftSaveStatus(
       savedDraft.saved_at
@@ -2016,6 +2519,7 @@ export default function App() {
               job_requirements: existingFormState.job_requirements,
               instruction: activeWorkspace.revision_instruction,
               additional_answers: existingFormState.additional_answers,
+              template_id: selectedResumeTemplateId,
             })
           : await reviseResume({
               profile: buildProfilePayload(greenfieldFormState),
@@ -2046,14 +2550,7 @@ export default function App() {
 
     setLoadingAction("save");
     try {
-      const snapshot = await saveResumeSnapshot({
-        title: activeWorkspace.title || buildResumeSnapshotTitle(activeJobInfo.target_company, activeJobInfo.target_role),
-        target_company: activeJobInfo.target_company,
-        target_role: activeJobInfo.target_role,
-        resume_text: activeWorkspace.resume_text,
-        generation_mode: activeWorkspace.generation_mode || "manual_preserve",
-        analysis_notes: activeWorkspace.analysis_notes || [],
-      });
+      const snapshot = await saveResumeSnapshot(buildSnapshotPayload(activeBoard));
       const snapshotTime = snapshot.timestamp ? new Date(snapshot.timestamp).toLocaleString() : "刚刚";
       setStatusText(
         activeBoard === "existing_resume"
@@ -2088,20 +2585,284 @@ export default function App() {
             "新建简历";
 
       const fileNameBase = slugifyFileName(activeWorkspace.title || fallbackExportTitle || "resume");
+      const suggestedFileName = `${fileNameBase}.${format === "txt" ? "txt" : "md"}`;
+      const exportMimeType =
+        format === "txt" ? "text/plain; charset=utf-8" : "text/markdown; charset=utf-8";
+      const saveTarget = await createSaveTarget(suggestedFileName, exportMimeType);
       const { blob, fileName } = await exportResumeFile({
         resume_text: activeWorkspace.resume_text,
         file_name: fileNameBase,
         format,
       });
-      downloadBlob(blob, fileName);
+      await saveTarget.write(blob);
       setStatusText(
-        activeBoard === "existing_resume"
-          ? `已导出优化版简历：${fileName}`
-          : `已导出简历：${fileName}`,
+        saveTarget.usedPicker
+          ? `已保存到你选择的位置：${fileName}`
+          : `当前浏览器不支持选择保存路径，已按默认下载方式保存：${fileName}`,
       );
       await refreshMemory();
     } catch (error) {
-      setStatusText(`导出失败：${error.message}`);
+      setStatusText(isFilePickerCancel(error) ? "已取消导出。" : `导出失败：${error.message}`);
+    } finally {
+      setLoadingAction("");
+    }
+  }
+
+  async function handleSaveResumeImage() {
+    const result = activeResumeImageState?.result;
+    if (!result?.preview_url) {
+      setStatusText("请先生成简历文件，再保存图片。");
+      return;
+    }
+
+    setLoadingAction("save_resume_image");
+    try {
+      const fallbackTitle =
+        activeWorkspace.title ||
+        buildResumeSnapshotTitle(activeJobInfo.target_company, activeJobInfo.target_role) ||
+        "resume-image";
+      const suffix = result.saved_name?.match(/\.[A-Za-z0-9]+$/)?.[0] || ".png";
+      const fileName = `${slugifyFileName(fallbackTitle || "resume-image")}-简历预览${suffix}`;
+      const saveTarget = await createSaveTarget(fileName, suffix === ".jpg" || suffix === ".jpeg" ? "image/jpeg" : "image/png");
+      const response = await fetch(result.preview_url);
+      if (!response.ok) {
+        throw new Error("无法读取生成后的图片预览文件。");
+      }
+      const blob = await response.blob();
+      await saveTarget.write(blob);
+      setStatusText(
+        saveTarget.usedPicker
+          ? `已保存简历预览图到你选择的位置：${fileName}`
+          : `当前浏览器不支持选择保存路径，已按默认下载方式保存预览图：${fileName}`,
+      );
+    } catch (error) {
+      setStatusText(isFilePickerCancel(error) ? "已取消保存图片。" : `保存图片失败：${error.message}`);
+    } finally {
+      setLoadingAction("");
+    }
+  }
+
+  async function handleSaveOrExportResumeImageWord() {
+    const result = activeResumeImageState?.result;
+    if (!result?.saved_name) {
+      setStatusText("请先生成简历文件，再保存 Word。");
+      return;
+    }
+
+    setLoadingAction("resume_image_word");
+    try {
+      if (result.kind === "docx_template") {
+        const suggestedFileName = result.file_name || result.saved_name || "resume.docx";
+        const saveTarget = await createSaveTarget(
+          suggestedFileName,
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        );
+        const { blob, fileName } = await downloadResumeFile(result.saved_name);
+        await saveTarget.write(blob);
+        setStatusText(
+          saveTarget.usedPicker
+            ? `已保存 Word 到你选择的位置：${fileName}。`
+            : `当前浏览器不支持选择保存路径，已按默认下载方式保存 Word：${fileName}。`,
+        );
+        return;
+      }
+
+      const existingWord = activeResumeImageState?.word_result;
+      const fallbackTitle =
+        activeWorkspace.title ||
+        buildResumeSnapshotTitle(activeJobInfo.target_company, activeJobInfo.target_role) ||
+        "resume-image";
+      const fileNameBase = `${slugifyFileName(fallbackTitle || "resume-image")}-OCR可编辑简历`;
+      const suggestedFileName = existingWord?.file_name || `${fileNameBase}.docx`;
+      const saveTarget = await createSaveTarget(
+        suggestedFileName,
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      );
+
+      const wordPayload = existingWord?.saved_name
+        ? await downloadResumeImageWord(existingWord.saved_name)
+        : await (async () => {
+            setStatusText("Umi-OCR 正在识别简历文件图片并转换 Word，请稍候...");
+            return exportResumeImageWord({
+              image_saved_name: result.saved_name,
+              file_name: fileNameBase,
+            });
+          })();
+
+      const { blob, fileName, blockCount = 0, lowConfidenceCount = 0 } = wordPayload;
+      await saveTarget.write(blob);
+
+      const nextWordResult = existingWord?.saved_name
+        ? existingWord
+        : {
+            file_name: fileName,
+            saved_name: wordPayload.savedName || fileName,
+            download_url: wordPayload.download_url || "",
+            image_saved_name: result.saved_name,
+            block_count: blockCount,
+            low_confidence_count: lowConfidenceCount,
+            generated_at: new Date().toISOString(),
+          };
+      const nextImageState = {
+        ...activeResumeImageState,
+        status: "done",
+        result,
+        word_result: nextWordResult,
+        error: "",
+      };
+
+      setResumeImageState((previous) => ({
+        ...previous,
+        [activeBoard]: nextImageState,
+      }));
+      void persistCurrentSnapshot({
+        board: activeBoard,
+        imageStateOverride: nextImageState,
+        silent: true,
+      });
+
+      const reviewHint =
+        nextWordResult.low_confidence_count > 0
+          ? `请重点检查 ${nextWordResult.low_confidence_count} 处低置信度文本。`
+          : "请检查姓名、电话、邮箱、时间和项目名称。";
+      setStatusText(
+        saveTarget.usedPicker
+          ? `已保存可编辑 Word：${fileName}。${reviewHint}`
+          : `当前浏览器不支持选择保存路径，已按默认下载方式保存 Word：${fileName}。${reviewHint}`,
+      );
+    } catch (error) {
+      setStatusText(isFilePickerCancel(error) ? "已取消保存 Word。" : `转 Word 失败：${error.message}`);
+    } finally {
+      setLoadingAction("");
+    }
+  }
+
+  async function handleGenerateResumeFile() {
+    const resumeText = activeWorkspace.resume_text.trim();
+    if (!resumeText) {
+      setStatusText("请先生成或编辑简历正文，再生成简历文件。");
+      return;
+    }
+
+    const templateId = selectedResumeTemplateId || resumeImageTemplates[0]?.id || "state-owned-general";
+    const avatar = activeBoard === "existing_resume" ? existingFormState.avatar : greenfieldFormState.avatar;
+
+    setLoadingAction("resume_file");
+    setResumeImageState((previous) => ({
+      ...previous,
+      [activeBoard]: {
+        ...previous[activeBoard],
+        status: "generating",
+        error: "",
+      },
+    }));
+
+    try {
+      const result = await generateResumeFile({
+        resume_text: resumeText,
+        template_id: templateId,
+        avatar_saved_name: avatar?.saved_name || "",
+        board: activeBoard,
+        structured_resume: activeWorkspace.structured_resume || {},
+        form_state: activeBoard === "existing_resume" ? existingFormState : greenfieldFormState,
+      });
+      const nextImageState = {
+        ...activeResumeImageState,
+        status: "done",
+        result,
+        word_result: {
+          file_name: result.file_name,
+          saved_name: result.saved_name,
+          download_url: result.download_url,
+          generated_at: result.generated_at,
+        },
+        error: "",
+      };
+
+      setResumeImageState((previous) => ({
+        ...previous,
+        [activeBoard]: nextImageState,
+      }));
+      setStatusText(`简历文件已生成：${result.template_name || "DOCX 模板"}，可保存 Word 或图片预览。`);
+      void persistCurrentSnapshot({
+        board: activeBoard,
+        imageStateOverride: nextImageState,
+        silent: true,
+      });
+      void refreshModelStatus({ silent: true });
+    } catch (error) {
+      setResumeImageState((previous) => ({
+        ...previous,
+        [activeBoard]: {
+          ...previous[activeBoard],
+          status: "error",
+          error: error.message,
+        },
+      }));
+      setStatusText(`简历文件生成失败：${error.message}`);
+    } finally {
+      setLoadingAction("");
+    }
+  }
+
+  async function handleGenerateResumeImage() {
+    const resumeText = activeWorkspace.resume_text.trim();
+    if (!resumeText) {
+      setStatusText("请先生成或编辑简历正文，再测试 AI 生图。");
+      return;
+    }
+
+    const templateId = selectedResumeTemplateId || resumeImageTemplates[0]?.id || "state-owned-general";
+    const avatar = activeBoard === "existing_resume" ? existingFormState.avatar : greenfieldFormState.avatar;
+
+    setLoadingAction("resume_image_test");
+    setResumeImageState((previous) => ({
+      ...previous,
+      [activeBoard]: {
+        ...previous[activeBoard],
+        image_test_status: "generating",
+        image_test_error: "",
+      },
+    }));
+
+    try {
+      const result = await generateResumeImage({
+        resume_text: resumeText,
+        template_id: templateId,
+        avatar_saved_name: avatar?.saved_name || "",
+        model: resumeImageModel,
+        board: activeBoard,
+      });
+      const nextImageState = {
+        ...activeResumeImageState,
+        image_test_status: "done",
+        image_test_result: result,
+        image_test_error: "",
+      };
+
+      setResumeImageState((previous) => ({
+        ...previous,
+        [activeBoard]: nextImageState,
+      }));
+      setStatusText(
+        `AI 生图测试已完成：${result.model_label || result.model || "Image2"}，耗时 ${result.latency_ms || "-"} ms。`,
+      );
+      void persistCurrentSnapshot({
+        board: activeBoard,
+        imageStateOverride: nextImageState,
+        silent: true,
+      });
+      void refreshModelStatus({ silent: true });
+    } catch (error) {
+      setResumeImageState((previous) => ({
+        ...previous,
+        [activeBoard]: {
+          ...previous[activeBoard],
+          image_test_status: "error",
+          image_test_error: error.message,
+        },
+      }));
+      setStatusText(`AI 生图测试失败：${error.message}`);
     } finally {
       setLoadingAction("");
     }
@@ -2127,6 +2888,9 @@ export default function App() {
       analysis_notes: Array.isArray(snapshot?.analysis_notes)
         ? snapshot.analysis_notes
         : previous.analysis_notes,
+      structured_resume:
+        inferStructuredResumeFromSnapshot(snapshot, activeBoard, restoredText) || previous.structured_resume,
+      contract_report: snapshot?.contract_report || previous.contract_report,
     }));
 
     setStatusText(
@@ -2136,7 +2900,87 @@ export default function App() {
     );
   }
 
-  function handleRedownloadExport(record) {
+  function handleRestoreFullSnapshot(snapshot) {
+    const restoredText = normalizeResumeText(snapshot?.resume_text || snapshot?.workspace?.resume_text || "");
+    if (!restoredText.trim()) {
+      setStatusText("这条简历快照没有可恢复的内容。");
+      return;
+    }
+
+    const restoredBoard =
+      snapshot?.board === "existing_resume" || snapshot?.workspace?.board === "existing_resume"
+        ? "existing_resume"
+        : snapshot?.board === "greenfield"
+          ? "greenfield"
+          : activeBoard;
+    const restoredStructuredResume = inferStructuredResumeFromSnapshot(snapshot, restoredBoard, restoredText);
+    const restoredWorkspace = {
+      ...createEmptyResumeWorkspace(),
+      ...clonePlainObject(snapshot?.workspace, createEmptyResumeWorkspace()),
+      title:
+        snapshot?.workspace?.title ||
+        snapshot?.title?.trim() ||
+        [snapshot?.target_company?.trim(), snapshot?.target_role?.trim()].filter(Boolean).join(" - ") ||
+        "已恢复简历快照",
+      resume_text: restoredText,
+      generation_mode: snapshot?.generation_mode || snapshot?.workspace?.generation_mode || "fallback",
+      analysis_notes: Array.isArray(snapshot?.analysis_notes)
+        ? snapshot.analysis_notes
+        : snapshot?.workspace?.analysis_notes || [],
+      structured_resume: restoredStructuredResume,
+      contract_report: snapshot?.workspace?.contract_report || snapshot?.contract_report || null,
+    };
+    const restoredImageBundle =
+      snapshot?.image_generation && typeof snapshot.image_generation === "object"
+        ? snapshot.image_generation
+        : {};
+    const restoredImageState = normalizeRestoredImageState(restoredImageBundle.state);
+
+    resetResumeReveal();
+    liveStreamAbortRef.current?.abort?.();
+    setLiveStreamState(createEmptyLiveStreamState());
+    setQuestions([]);
+    setQuestionAnswers({});
+    setQuestionsOpen(false);
+    setActiveBoard(restoredBoard);
+    setActiveInfoPage(null);
+    setHistoryDrawerOpen(false);
+    closeRecordPreview();
+
+    if (restoredBoard === "existing_resume") {
+      if (snapshot?.form_state && Object.keys(snapshot.form_state).length > 0) {
+        setExistingFormState({
+          ...createEmptyExistingResumeInput(),
+          ...clonePlainObject(snapshot.form_state, createEmptyExistingResumeInput()),
+        });
+      }
+      setExistingResumeWorkspace(restoredWorkspace);
+    } else {
+      if (snapshot?.form_state && Object.keys(snapshot.form_state).length > 0) {
+        setGreenfieldFormState(withAssignedMembershipLevel(snapshot.form_state));
+      }
+      setGreenfieldWorkspace(restoredWorkspace);
+    }
+
+    if (restoredImageBundle.selected_template_id) {
+      setSelectedResumeTemplateId(restoredImageBundle.selected_template_id);
+    }
+    if (restoredImageBundle.model) {
+      setResumeImageModel(restoredImageBundle.model);
+    }
+    setResumeImageState((previous) => ({
+      ...previous,
+      [restoredBoard]: restoredImageState,
+    }));
+    setResumeImagePageOpen(Boolean(restoredImageState.result?.preview_url || snapshot?.resume_image_page_open));
+
+    const restoredAt = snapshot?.timestamp ? new Date(snapshot.timestamp).toLocaleString() : "历史记录";
+    const imageCopy = restoredImageState.result?.preview_url ? "，图片结果已恢复" : "";
+    const wordCopy = restoredImageState.word_result?.saved_name ? "，Word 结果已恢复" : "";
+    setStatusText(`已恢复 ${restoredAt} 的完整工作区${imageCopy}${wordCopy}。`);
+  }
+
+  async function handleRedownloadExport(record) {
     if (!record?.resume_text) {
       setStatusText("这条导出记录缺少正文内容，暂时无法重新下载。");
       return;
@@ -2147,8 +2991,16 @@ export default function App() {
     const fallbackExtension = record.format === "txt" ? "txt" : "md";
     const fileName = record.file_name || `resume.${fallbackExtension}`;
     const blob = new Blob([record.resume_text], { type: mimeType });
-    downloadBlob(blob, fileName);
-    setStatusText(`已重新下载 ${fileName}。`);
+    try {
+      const saveResult = await saveBlobToUserPath(blob, fileName);
+      setStatusText(
+        saveResult.usedPicker
+          ? `已保存到你选择的位置：${fileName}`
+          : `当前浏览器不支持选择保存路径，已按默认下载方式保存：${fileName}`,
+      );
+    } catch (error) {
+      setStatusText(isFilePickerCancel(error) ? "已取消保存。" : `保存失败：${error.message}`);
+    }
   }
 
   async function handleDeleteSnapshot(snapshot) {
@@ -2290,59 +3142,57 @@ export default function App() {
 
   const questionCardCopy = buildQuestionCardCopy(questionFlowMode);
   const currentModeLabel = BOARD_LABELS[activeBoard] || BOARD_LABELS.greenfield;
-  const currentModelLabel = modelStatus?.model || backendStatus?.model || "未配置";
-  const isLocalFallbackReady =
-    modelStatus?.status === "fallback_only" ||
+  const textGeneration = modelStatus?.text_generation || modelStatus || {};
+  const textFallback =
+    textGeneration.status === "fallback_only" ||
+    textGeneration.status === "本地兜底" ||
     (!modelStatusLoading && backendStatus?.status === "ok" && !backendStatus?.ai_available);
-  const modelLatencyLabel =
-    typeof modelStatus?.latency_ms === "number"
-      ? `${modelStatus.latency_ms} ms`
-      : modelStatusLoading
-        ? "检测中..."
-        : isLocalFallbackReady
-          ? "本地模式"
-        : backendStatus?.status === "ok"
-          ? "待检测"
-          : "不可用";
+  const textModel = "Deepseekv4";
+  const textModelStatus = textFallback
+    ? "本地兜底"
+    : textGeneration.reachable
+      ? "可用"
+      : textGeneration.configured === false
+        ? "未配置"
+        : "不可用";
+  const textModelLatency =
+    typeof textGeneration.latency_ms === "number"
+      ? `${textGeneration.latency_ms} ms`
+      : textFallback
+        ? "本地模式"
+        : modelStatusLoading
+          ? "检测中..."
+          : null;
+  const textModelTone = modelStatusLoading
+    ? "pending"
+    : textFallback
+      ? "local"
+      : textGeneration.reachable
+        ? "healthy"
+        : textGeneration.configured === false
+          ? "pending"
+          : "error";
+
+  const imageGeneration = modelStatus?.image_generation || {};
+  const image2 = imageGeneration.image2 || {};
+  const image2Pro = imageGeneration.image2_pro || {};
+
+  const imageModel = "ChatGPT image2 (pro)";
+  const imageModelConfigured = image2.configured === true || image2Pro.configured === true;
+  const imageModelStatus =
+    image2.configured === false && image2Pro.configured === false
+      ? "未配置"
+      : imageModelConfigured
+        ? "已配置"
+        : "待配置";
+  const imageModelTone = "pending";
+  const imageModelMeta = imageModelConfigured ? "零成本状态" : "未配置生图密钥";
+
   const modelCheckedLabel = modelStatus?.checked_at
     ? new Date(modelStatus.checked_at).toLocaleTimeString()
     : modelStatusLoading
       ? "检测中..."
       : "未检测";
-  const modelAvailability =
-    typeof modelStatus?.reachable === "boolean"
-      ? modelStatus.reachable
-      : Boolean(backendStatus?.ai_available);
-  const modelStatusTone =
-    modelStatusLoading
-      ? "pending"
-      : isLocalFallbackReady
-        ? "local"
-        : modelAvailability
-        ? "healthy"
-        : "error";
-  const modelHealthLabel =
-    modelStatusTone === "healthy"
-      ? "运行正常"
-      : modelStatusTone === "local"
-        ? "本地演示"
-      : modelStatusTone === "error"
-        ? "连接异常"
-        : "检测中";
-  const modelAvailabilityLabel =
-    modelStatusTone === "healthy"
-      ? "云端可用"
-      : modelStatusTone === "local"
-        ? "本地可用"
-        : "不可用";
-  const modelStatusHint =
-    modelStatusTone === "local"
-      ? "当前未配置云端模型密钥，系统已切换到本地兜底演示模式。简历生成、改写、导出、历史恢复等核心流程仍可验证；如需实时 AI，只需在 backend/.env 中填写受限演示密钥。"
-      : modelStatusTone === "error"
-      ? modelStatus?.error || "模型探测失败，请检查后端配置或接口连通性。"
-      : modelStatusTone === "pending"
-        ? "正在重新探测模型可用性与接口延迟。"
-        : "手动刷新后会重新探测当前模型与接口延迟。";
 
   const hasPendingQuestionsForActiveBoard =
     questions.length > 0 && questionFlowMode === activeBoard;
@@ -2357,7 +3207,8 @@ export default function App() {
   const greenfieldStructuredCount =
     countFilledItems(greenfieldFormState.education) +
     countFilledItems(greenfieldFormState.projects) +
-    countFilledItems(greenfieldFormState.experiences);
+    countFilledItems(greenfieldFormState.experiences) +
+    countFilledItems(greenfieldFormState.awards);
   const greenfieldAttachmentCount = [
     ...greenfieldFormState.projects,
     ...greenfieldFormState.experiences,
@@ -2568,6 +3419,9 @@ export default function App() {
   const activeStructuredProjectCount = Array.isArray(activeStructuredResume?.projects)
     ? activeStructuredResume.projects.length
     : 0;
+  const activeStructuredAwardCount = Array.isArray(activeStructuredResume?.awards)
+    ? activeStructuredResume.awards.length
+    : 0;
   const activeStructuredEducationCount = Array.isArray(activeStructuredResume?.education)
     ? activeStructuredResume.education.length
     : 0;
@@ -2636,6 +3490,11 @@ export default function App() {
       meta: "项目证明与成果卡片",
     },
     {
+      label: "获奖情况",
+      value: activeSectionCounts.awards ?? activeStructuredAwardCount,
+      meta: "奖项、竞赛、证书和荣誉",
+    },
+    {
       label: "教育背景",
       value: activeSectionCounts.education ?? activeStructuredEducationCount,
       meta: "学校、学位与亮点",
@@ -2689,25 +3548,33 @@ export default function App() {
     activeAtsResumeData && hasAtsJobDescription && activeAtsJobDescription.trim()
       ? calculateATSScore(activeAtsResumeData, activeAtsJobDescription)
       : null;
-  const activeAtsResult = semanticAtsState.result || localAtsResult;
+  const shouldWaitForBackendAts =
+    backendStatus?.status === "ok" &&
+    Boolean(activeAtsResumeData) &&
+    Boolean(hasAtsJobDescription && activeAtsJobDescription.trim());
+  const activeAtsResult = shouldWaitForBackendAts
+    ? semanticAtsState.result || (semanticAtsState.status === "fallback" ? localAtsResult : null)
+    : localAtsResult;
   const activeAtsMeta = activeAtsResult
     ? {
         scoreModeLabel:
-          semanticAtsState.result?.mode === "embedding"
-            ? "语义嵌入评分"
-            : semanticAtsState.result?.mode === "lexical_fallback"
+          activeAtsResult?.mode === "enterprise_rules"
+            ? "企业 ATS 规则"
+            : activeAtsResult?.mode === "embedding"
+              ? "语义嵌入评分"
+            : activeAtsResult?.mode === "lexical_fallback"
               ? "语义回退评分"
               : "本地关键词评分",
-        providerLabel: semanticAtsState.result?.model
-          ? `${semanticAtsState.result.provider} / ${semanticAtsState.result.model}`
-          : semanticAtsState.result?.provider || "local",
+        providerLabel: activeAtsResult?.model
+          ? `${activeAtsResult.provider} / ${activeAtsResult.model}`
+          : activeAtsResult?.provider || "local",
         semanticSimilarity:
-          typeof semanticAtsState.result?.semanticSimilarity === "number"
-            ? semanticAtsState.result.semanticSimilarity
+          typeof activeAtsResult?.semanticSimilarity === "number"
+            ? activeAtsResult.semanticSimilarity
             : null,
         keywordCoverage:
-          typeof semanticAtsState.result?.keywordCoverage === "number"
-            ? semanticAtsState.result.keywordCoverage
+          typeof activeAtsResult?.keywordCoverage === "number"
+            ? activeAtsResult.keywordCoverage
             : null,
         ragHitCount: ragInsightsState.count || 0,
         ragModeLabel:
@@ -2782,20 +3649,24 @@ export default function App() {
         ];
   const editAnchorItems =
     activeInfoPage === "existing_resume"
-      ? [
-          { id: "existing-job-target", label: "目标岗位", meta: "公司、岗位与 JD", index: "01" },
-          { id: "existing-status", label: "资料状态", meta: "输入状态与追问回答", index: "02" },
-          { id: "existing-source", label: "原始简历", meta: "上传或粘贴待优化简历", index: "03" },
-        ]
-      : [
-          { id: "greenfield-job-target", label: "目标岗位", meta: "公司、岗位与 JD", index: "01" },
-          { id: "greenfield-management", label: "工作区设置", meta: "保存、恢复与模块管理", index: "02" },
-          { id: "greenfield-profile", label: "基础资料", meta: "候选人基本信息", index: "03" },
-          { id: "greenfield-skills", label: "技能清单", meta: "技能库存", index: "04" },
-          { id: "greenfield-education", label: "教育背景", meta: "学校与亮点", index: "05" },
-          { id: "greenfield-projects", label: "项目经历", meta: "项目证明与附件", index: "06" },
-          { id: "greenfield-experiences", label: "工作经历", meta: "履历与成果表达", index: "07" },
-        ];
+        ? [
+            { id: "existing-template", label: "文件模板", meta: "Word 与预览版式", index: "01" },
+            { id: "existing-job-target", label: "目标岗位", meta: "公司、岗位与 JD", index: "02" },
+            { id: "existing-status", label: "资料状态", meta: "输入状态与追问回答", index: "03" },
+            { id: "existing-avatar", label: "个人头像", meta: "证件照或职业照", index: "04" },
+            { id: "existing-source", label: "原始简历", meta: "上传或粘贴待优化简历", index: "05" },
+          ]
+        : [
+            { id: "greenfield-template", label: "文件模板", meta: "Word 与预览版式", index: "01" },
+            { id: "greenfield-job-target", label: "目标岗位", meta: "公司、岗位与 JD", index: "02" },
+            { id: "greenfield-management", label: "工作区设置", meta: "保存、恢复与模块管理", index: "03" },
+            { id: "greenfield-profile", label: "基础资料", meta: "候选人基本信息", index: "04" },
+            { id: "greenfield-skills", label: "技能清单", meta: "技能库存", index: "05" },
+            { id: "greenfield-education", label: "教育背景", meta: "学校与亮点", index: "06" },
+            { id: "greenfield-projects", label: "项目经历", meta: "项目证明与附件", index: "07" },
+            { id: "greenfield-awards", label: "获奖经历", meta: "奖项、等级与时间", index: "08" },
+            { id: "greenfield-experiences", label: "工作经历", meta: "履历与成果表达", index: "09" },
+          ];
   const liveJsonContent = liveStreamSnippet || workspaceMonitorJsonFallback;
   const workspaceStatusTone = isActiveBoardStreaming
     ? "流式生成中"
@@ -2817,6 +3688,9 @@ export default function App() {
     liveStreamState.board === activeBoard ? liveStreamState.status : "";
   const activeStreamStepText = getStreamStepText(liveStreamState, activeBoard);
   const activeStreamActivities = buildStreamActivityItems(liveStreamState, activeBoard);
+  const activeAvatar =
+    activeBoard === "existing_resume" ? existingFormState.avatar : greenfieldFormState.avatar;
+  const activeResumeImageState = resumeImageState[activeBoard] || createEmptyResumeImageState();
   const primaryActionCta =
     activeBoard === "existing_resume"
       ? isActiveBoardStreaming
@@ -2835,14 +3709,15 @@ export default function App() {
         accountPointsLabel={accountPointsLabel}
         accountMembershipLabel={accountMembershipLabel}
         currentBillingModeLabel={currentBillingModeLabel}
-        currentModelLabel={currentModelLabel}
-        modelAvailability={modelAvailability}
-        modelAvailabilityLabel={modelAvailabilityLabel}
-        modelStatusTone={modelStatusTone}
-        modelHealthLabel={modelHealthLabel}
-        modelLatencyLabel={modelLatencyLabel}
+        textModel={textModel}
+        textModelStatus={textModelStatus}
+        textModelLatency={textModelLatency}
+        textModelTone={textModelTone}
+        imageModel={imageModel}
+        imageModelStatus={imageModelStatus}
+        imageModelMeta={imageModelMeta}
+        imageModelTone={imageModelTone}
         modelCheckedLabel={modelCheckedLabel}
-        modelStatusHint={modelStatusHint}
         modelStatusLoading={modelStatusLoading}
         onRefreshModel={refreshModelStatus}
       />
@@ -2852,7 +3727,7 @@ export default function App() {
           <div className="flex h-full items-center justify-between gap-4">
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold text-gray-900">
-                {activeInfoPage ? "编辑模式" : "工作台"} - {currentModeLabel}
+                {resumeImagePageOpen ? "文件生成" : activeInfoPage ? "编辑模式" : "工作台"} - {currentModeLabel}
               </p>
               <p className="truncate text-xs text-gray-500">
                 当前进度 {activeReadiness}% · {activeReadinessGap} · 正文{" "}
@@ -2886,7 +3761,15 @@ export default function App() {
                 </button>
               </div>
 
-              {activeInfoPage ? (
+              {resumeImagePageOpen ? (
+                <button
+                  type="button"
+                  onClick={handleCloseResumeImagePage}
+                  className="rounded-full border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:border-gray-300 hover:text-gray-900"
+                >
+                  返回工作台
+                </button>
+              ) : activeInfoPage ? (
                 <button
                   type="button"
                   onClick={handleCloseInfoPage}
@@ -2940,7 +3823,31 @@ export default function App() {
           </div>
         </header>
 
-        {activeInfoPage ? (
+        {resumeImagePageOpen ? (
+          <div className="flex-1 overflow-y-auto p-6">
+            <ResumeImagePanel
+              boardLabel={currentModeLabel}
+              templates={resumeImageTemplates}
+              selectedTemplateId={selectedResumeTemplateId}
+              onSelectTemplate={setSelectedResumeTemplateId}
+              model={resumeImageModel}
+              onModelChange={setResumeImageModel}
+              avatar={activeAvatar}
+              resumeTextLength={activeResumeLength}
+              hasResumeText={Boolean(activeWorkspace.resume_text.trim())}
+              loading={loadingAction === "resume_file"}
+              imageTestLoading={loadingAction === "resume_image_test"}
+              savingImage={loadingAction === "save_resume_image"}
+              savingWord={loadingAction === "resume_image_word"}
+              imageState={activeResumeImageState}
+              onGenerate={handleGenerateResumeFile}
+              onGenerateImageTest={handleGenerateResumeImage}
+              onSaveImage={handleSaveResumeImage}
+              onSaveWord={handleSaveOrExportResumeImageWord}
+              onBack={handleCloseResumeImagePage}
+            />
+          </div>
+        ) : activeInfoPage ? (
           <div className="flex-1 overflow-y-auto">
             <div className="mx-auto flex max-w-[1500px] gap-8 px-6 py-6">
               <EditAnchorNav items={editAnchorItems} />
@@ -2999,19 +3906,29 @@ export default function App() {
                       }
                       onToggleModule={toggleModule}
                       onUploadFiles={handleScopedUpload}
+                      avatar={greenfieldFormState.avatar}
+                      onAvatarUpload={(files, inputElement) =>
+                        handleAvatarUpload("greenfield", files, inputElement)
+                      }
+                      onClearAvatar={() => handleClearAvatar("greenfield")}
                       onListItemChange={updateGreenfieldListItem}
                       onAddListItem={addListItem}
                       onRemoveListItem={removeListItem}
                       onBack={handleCloseInfoPage}
                       hasPendingQuestions={hasPendingQuestionsForActiveBoard}
                       onOpenQuestions={() => setQuestionsOpen(true)}
+                      templates={resumeImageTemplates}
+                      selectedTemplateId={selectedResumeTemplateId}
+                      onSelectTemplate={setSelectedResumeTemplateId}
                       sectionIds={{
+                        template: "greenfield-template",
                         jobTarget: "greenfield-job-target",
                         management: "greenfield-management",
                         profile: "greenfield-profile",
                         skills: "greenfield-skills",
                         education: "greenfield-education",
                         projects: "greenfield-projects",
+                        awards: "greenfield-awards",
                         experiences: "greenfield-experiences",
                       }}
                     />
@@ -3025,16 +3942,26 @@ export default function App() {
                       jobInfoReady={existingJobInfoReady}
                       resumeSourceText={existingFormState.resume_source_text}
                       resumeSourceName={existingFormState.resume_source_name}
+                      avatar={existingFormState.avatar}
                       additionalAnswerCount={existingAnswerCount}
                       onResumeSourceChange={(value) => updateExistingField("resume_source_text", value)}
                       onUploadResumeFile={handleExistingResumeUpload}
+                      onAvatarUpload={(files, inputElement) =>
+                        handleAvatarUpload("existing_resume", files, inputElement)
+                      }
+                      onClearAvatar={() => handleClearAvatar("existing_resume")}
                       onClearInfo={handleClearExistingInfo}
                       onBack={handleCloseInfoPage}
                       hasPendingQuestions={hasPendingQuestionsForActiveBoard}
                       onOpenQuestions={() => setQuestionsOpen(true)}
+                      templates={resumeImageTemplates}
+                      selectedTemplateId={selectedResumeTemplateId}
+                      onSelectTemplate={setSelectedResumeTemplateId}
                       sectionIds={{
+                        template: "existing-template",
                         jobTarget: "existing-job-target",
                         status: "existing-status",
+                        avatar: "existing-avatar",
                         source: "existing-source",
                       }}
                     />
@@ -3120,6 +4047,7 @@ export default function App() {
                     }
                     draftSaving={draftSaving}
                     hasSavedBackup={Boolean(memory?.workspace_draft?.form_state)}
+                    onOpenResumeImagePage={handleOpenResumeImagePage}
                   />
                 </div>
               </section>
@@ -3190,7 +4118,7 @@ export default function App() {
         onClose={() => setHistoryDrawerOpen(false)}
         analysisNotes={activeWorkspace.analysis_notes}
         memory={memory}
-        onRestoreSnapshot={handleRestoreSnapshot}
+        onRestoreSnapshot={handleRestoreFullSnapshot}
         onDeleteSnapshot={handleDeleteSnapshot}
         onPreviewUpload={handlePreviewUpload}
         onDeleteUpload={handleDeleteUpload}

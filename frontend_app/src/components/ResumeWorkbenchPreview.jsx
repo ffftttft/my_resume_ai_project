@@ -1,13 +1,13 @@
 import React from "react";
 import {
   BriefcaseBusiness,
-  FileText,
   FolderKanban,
   GraduationCap,
   Mail,
   MapPin,
   Phone,
   Sparkles,
+  Trophy,
   Wrench,
 } from "lucide-react";
 import { StreamingTextContainer } from "./LoadingIndicators";
@@ -160,7 +160,6 @@ export default function ResumeWorkbenchPreview({
   generationMode,
   isStreaming,
   streamStatus,
-  summaryItems = [],
 }) {
   const contact = asObject(structuredResume?.contact);
   const summary = asText(structuredResume?.summary);
@@ -168,11 +167,12 @@ export default function ResumeWorkbenchPreview({
   const experience = toObjectArray(structuredResume?.experience);
   const projects = toObjectArray(structuredResume?.projects);
   const education = toObjectArray(structuredResume?.education);
+  const awards = toObjectArray(structuredResume?.awards);
   const hasResumeText = Boolean(asText(resumeText));
   const headerTitle = asText(title) || asText(contact.target_role) || `${boardLabel}结果预览`;
   const statusLabel = isStreaming
     ? "流式写入中"
-    : generationMode === "openai"
+    : ["openai", "deepseek"].includes(generationMode)
       ? "AI 结果"
       : "回退结果";
 
@@ -203,7 +203,7 @@ export default function ResumeWorkbenchPreview({
       </section>
 
       <section className="grid gap-6 xl:grid-cols-2">
-        <PreviewCard icon={Sparkles} title="个人概述" subtitle="展示候选人身份与目标岗位。">
+        <PreviewCard icon={GraduationCap} title="个人信息" subtitle="身份、目标岗位和教育信息集中展示。">
           <div className="space-y-3">
             <div>
               <h3 className="text-2xl font-semibold tracking-tight text-gray-900">
@@ -222,30 +222,35 @@ export default function ResumeWorkbenchPreview({
               <MetaPill icon={MapPin} value={asText(contact.city)} />
             </div>
 
-            {summary ? (
-              <StreamingTextContainer isStreaming={isStreaming}>
-                <p className="text-sm leading-7 text-gray-700">{summary}</p>
-              </StreamingTextContainer>
+            {education.length > 0 ? (
+              education.map((item, index) => (
+                <EntryBlock
+                  key={`${asText(item.school_name, "education")}-${index}`}
+                  title={asText(item.school_name) || "教育信息"}
+                  meta={[
+                    asText(item.degree) || "",
+                    asText(item.major) || "",
+                    formatPeriod(item.start_date, item.end_date),
+                  ].filter(Boolean)}
+                  bullets={toTextArray(item.highlights)}
+                />
+              ))
             ) : (
-              <EmptyState>模型锁定有效 contract 后，这里会展示结构化个人摘要。</EmptyState>
+              <EmptyState>结构化教育信息准备完成后，会并入个人信息区域。</EmptyState>
             )}
           </div>
         </PreviewCard>
 
-        <PreviewCard icon={Wrench} title="核心技能" subtitle="按分组查看结构化技能。">
-          <SkillsPanel skills={skills} />
-        </PreviewCard>
-
         <PreviewCard
           icon={BriefcaseBusiness}
-          title="工作经历"
+          title="实习经历"
           subtitle="工作内容较长时仅在卡内滚动。"
         >
           {experience.length > 0 ? (
             experience.map((item, index) => (
               <EntryBlock
                 key={`${asText(item.company_name, "experience")}-${index}`}
-                title={asText(item.company_name) || asText(item.job_title) || "工作经历"}
+                title={asText(item.company_name) || asText(item.job_title) || "实习经历"}
                 meta={[asText(item.job_title) || "", formatPeriod(item.start_date, item.end_date)].filter(
                   Boolean,
                 )}
@@ -256,7 +261,7 @@ export default function ResumeWorkbenchPreview({
               />
             ))
           ) : (
-            <EmptyState>生成或优化完成后，这里会展示结构化工作经历。</EmptyState>
+            <EmptyState>生成或优化完成后，这里会展示结构化实习/工作经历。</EmptyState>
           )}
         </PreviewCard>
 
@@ -284,64 +289,33 @@ export default function ResumeWorkbenchPreview({
           )}
         </PreviewCard>
 
-        <PreviewCard
-          icon={GraduationCap}
-          title="教育背景"
-          subtitle="学校、学位、专业与亮点概览。"
-        >
-          {education.length > 0 ? (
-            education.map((item, index) => (
+        <PreviewCard icon={Wrench} title="个人技能" subtitle="按分组查看结构化技能。">
+          <SkillsPanel skills={skills} />
+        </PreviewCard>
+
+        <PreviewCard icon={Trophy} title="获奖情况" subtitle="奖项、竞赛、证书和荣誉情况。">
+          {awards.length > 0 ? (
+            awards.map((item, index) => (
               <EntryBlock
-                key={`${asText(item.school_name, "education")}-${index}`}
-                title={asText(item.school_name) || "教育背景"}
-                meta={[
-                  asText(item.degree) || "",
-                  asText(item.major) || "",
-                  formatPeriod(item.start_date, item.end_date),
-                ].filter(Boolean)}
-                bullets={toTextArray(item.highlights)}
+                key={`${asText(item.award_name, "award")}-${index}`}
+                title={asText(item.award_name) || "获奖经历"}
+                meta={[asText(item.level), asText(item.date), asText(item.issuer)].filter(Boolean)}
+                summary={asText(item.description)}
+                isStreaming={isStreaming}
               />
             ))
           ) : (
-            <EmptyState>结构化教育信息准备完成后，这里会自动更新。</EmptyState>
+            <EmptyState>生成或优化完成后，这里会展示结构化获奖、荣誉、竞赛或证书记录。</EmptyState>
           )}
         </PreviewCard>
 
-        <PreviewCard
-          icon={FileText}
-          title="信息摘要"
-          subtitle="主舞台的目标、JD 和素材快照。"
-        >
-          {summaryItems.length > 0 ? (
-            <div className="grid gap-3 sm:grid-cols-2">
-              {summaryItems.map((item) => (
-                <div
-                  key={item.label}
-                  className="rounded-xl border border-gray-100 bg-gray-50 p-4"
-                >
-                  <p className="truncate text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-500">
-                    {item.label}
-                  </p>
-                  <p className="mt-2 truncate text-sm font-semibold text-gray-900" title={item.value}>
-                    {item.value}
-                  </p>
-                  <p
-                    className="mt-1 text-xs leading-5 text-gray-500"
-                    style={{
-                      display: "-webkit-box",
-                      WebkitLineClamp: 2,
-                      WebkitBoxOrient: "vertical",
-                      overflow: "hidden",
-                    }}
-                    title={item.meta}
-                  >
-                    {item.meta}
-                  </p>
-                </div>
-              ))}
-            </div>
+        <PreviewCard icon={Sparkles} title="个人总结" subtitle="岗位导向的候选人总结。">
+          {summary ? (
+            <StreamingTextContainer isStreaming={isStreaming}>
+              <p className="text-sm leading-7 text-gray-700">{summary}</p>
+            </StreamingTextContainer>
           ) : (
-            <EmptyState>当前还没有可展示的摘要信息。</EmptyState>
+            <EmptyState>模型锁定有效 contract 后，这里会展示结构化个人总结。</EmptyState>
           )}
         </PreviewCard>
       </section>

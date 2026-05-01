@@ -1,4 +1,4 @@
-"""AI engine that uses OpenAI when available and a local fallback when not configured."""
+"""AI engine that uses an OpenAI-compatible chat API with a local fallback."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 from typing import Dict, List
 from urllib.parse import urlparse
 
-import instructor
 from openai import OpenAI
 
 from ai_modules.prompts import (
@@ -26,6 +25,7 @@ from ai_modules.prompts import (
     build_revision_messages,
 )
 from ai_modules.structured_contracts import (
+    ResumeAwardRecord,
     ResumeEducationRecord,
     ResumeExperienceRecord,
     ResumeGenerationResult,
@@ -41,10 +41,17 @@ from ai_modules.structured_renderer import build_contract_report, render_resume_
 class ResumeAIEngine:
     """Generate questions, draft resumes, and revisions for the local prototype."""
 
-    def __init__(self, api_key: str = "", base_url: str = "", model_name: str = "gpt-5.4-mini"):
+    def __init__(
+        self,
+        api_key: str = "",
+        base_url: str = "",
+        model_name: str = "deepseek-v4-flash",
+        provider_label: str = "",
+    ):
         self.api_key = api_key or ""
         self.base_url = (base_url or "").rstrip("/")
         self.model_name = model_name
+        self.provider_label = (provider_label or "").strip()
         self.client = (
             OpenAI(
                 api_key=self.api_key,
@@ -53,9 +60,7 @@ class ResumeAIEngine:
             if self.api_key
             else None
         )
-        self.structured_client = (
-            instructor.from_openai(self.client, mode=instructor.Mode.TOOLS) if self.client else None
-        )
+        self.structured_client = self.client
         self.session_context: Dict[str, object] = {}
         self.reset_session_context()
 
@@ -67,13 +72,42 @@ class ResumeAIEngine:
 
     @property
     def effective_base_url(self) -> str:
-        """Return the configured API base URL or the OpenAI default."""
+        """Return the configured API base URL or the OpenAI-compatible default."""
 
         return self.base_url or "https://api.openai.com/v1"
 
     @property
+    def display_model_name(self) -> str:
+        """Return the model name shown in diagnostics and the frontend."""
+
+        normalized_model = (self.model_name or "").lower()
+        normalized_provider = (self.provider_label or "").lower()
+        if "deepseek" in normalized_model or "deepseek" in normalized_provider:
+            return "deepseekv4"
+        return self.model_name
+
+    @property
+    def wire_api(self) -> str:
+        """Return the API family used by this engine."""
+
+        return "chat.completions"
+
+    @property
+    def ai_mode(self) -> str:
+        """Return a stable internal generation mode label."""
+
+        normalized_model = (self.model_name or "").lower()
+        normalized_provider = (self.provider_label or "").lower()
+        if "deepseek" in normalized_model or "deepseek" in normalized_provider:
+            return "deepseek"
+        return "openai"
+
+    @property
     def provider_name(self) -> str:
         """Return a short provider label for diagnostics."""
+
+        if self.provider_label:
+            return self.provider_label
 
         if not self.base_url:
             return "OpenAI"
@@ -81,6 +115,8 @@ class ResumeAIEngine:
         hostname = urlparse(self.effective_base_url).hostname or ""
         if not hostname:
             return "OpenAI-compatible"
+        if "deepseek" in hostname.lower():
+            return "DeepSeek"
         if hostname.endswith("openai.com"):
             return "OpenAI"
         return hostname
@@ -113,29 +149,99 @@ class ResumeAIEngine:
         enriched["session_reset_at"] = self.session_context.get("session_reset_at", "")
         return enriched
 
+    def _chat_messages_with_json_schema(self, response_model, messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
+        """Add an explicit JSON-schema instruction for providers without native Pydantic parsing."""
+
+        schema = response_model.model_json_schema()
+        schema_text = json.dumps(schema, ensure_ascii=False)
+        instruction = (
+            "Return exactly one valid JSON object. Do not use markdown fences or explanatory text. "
+            "The JSON object must validate against this JSON Schema:\n"
+            f"{schema_text}"
+        )
+        prepared = [dict(message) for message in messages]
+        if prepared and prepared[0].get("role") == "system":
+            prepared[0]["content"] = f"{prepared[0].get('content', '')}\n\n{instruction}"
+        else:
+            prepared.insert(0, {"role": "system", "content": instruction})
+        return prepared
+
+    def _chat_completion_text(
+        self,
+        messages: List[Dict[str, str]],
+        *,
+        json_mode: bool = False,
+        temperature: float = 0.2,
+    ) -> str:
+        """Call an OpenAI-compatible chat completion endpoint and return text."""
+
+        if not self.client:
+            raise RuntimeError("AI client is not configured.")
+
+        kwargs = {
+            "model": self.model_name,
+            "messages": messages,
+            "temperature": temperature,
+        }
+        if json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
+
+        response = self.client.chat.completions.create(**kwargs)
+        if not response.choices:
+            return ""
+        message = response.choices[0].message
+        return (getattr(message, "content", "") or "").strip()
+
+    def _stream_chat_completion_text(
+        self,
+        messages: List[Dict[str, str]],
+        *,
+        json_mode: bool = False,
+        temperature: float = 0.2,
+    ):
+        """Yield text deltas from an OpenAI-compatible streaming chat completion."""
+
+        if not self.client:
+            raise RuntimeError("AI client is not configured.")
+
+        kwargs = {
+            "model": self.model_name,
+            "messages": messages,
+            "temperature": temperature,
+            "stream": True,
+        }
+        if json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
+
+        stream = self.client.chat.completions.create(**kwargs)
+        for chunk in stream:
+            if not getattr(chunk, "choices", None):
+                continue
+            delta = getattr(chunk.choices[0], "delta", None)
+            content = getattr(delta, "content", "") if delta is not None else ""
+            if content:
+                yield content
+
+    def _stream_structured_json(self, response_model, messages: List[Dict[str, str]]):
+        """Yield structured JSON text from the configured chat model."""
+
+        prepared_messages = self._chat_messages_with_json_schema(response_model, messages)
+        yield from self._stream_chat_completion_text(
+            prepared_messages,
+            json_mode=True,
+            temperature=0.2,
+        )
+
     def _stream_text(self, system_prompt: str, payload_text: str) -> str:
-        """Collect streamed text from the Responses API."""
+        """Collect streamed text from the chat completions API."""
 
         raw_text_parts: List[str] = []
-        with self.client.responses.stream(
-            model=self.model_name,
-            instructions=system_prompt,
-            input=payload_text,
-        ) as stream:
-            for event in stream:
-                event_type = getattr(event, "type", "")
-                if event_type == "response.output_text.delta":
-                    delta = getattr(event, "delta", "") or ""
-                    if delta:
-                        raw_text_parts.append(delta)
-                elif event_type == "response.output_text.done" and not raw_text_parts:
-                    text = getattr(event, "text", "") or ""
-                    if text:
-                        raw_text_parts.append(text)
-
-            if not raw_text_parts:
-                final_response = stream.get_final_response()
-                return getattr(final_response, "output_text", "") or ""
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": payload_text},
+        ]
+        for delta in self._stream_chat_completion_text(messages, temperature=0):
+            raw_text_parts.append(delta)
 
         return "".join(raw_text_parts)
 
@@ -153,50 +259,37 @@ class ResumeAIEngine:
         raise ValueError("Model did not return valid JSON.")
 
     def _call_openai(self, system_prompt: str, payload_text: str) -> Dict:
-        """Call OpenAI Responses API and parse the JSON result."""
+        """Call an OpenAI-compatible chat API and parse the JSON result."""
 
         if not self.client:
-            raise RuntimeError("OpenAI client is not configured.")
+            raise RuntimeError("AI client is not configured.")
 
-        raw_text = self._stream_text(system_prompt, payload_text)
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    f"{system_prompt}\n\n"
+                    "Return valid JSON only. Do not use markdown fences or explanatory text."
+                ),
+            },
+            {"role": "user", "content": payload_text},
+        ]
+        raw_text = self._chat_completion_text(messages, json_mode=True, temperature=0.2)
         return self._extract_json(raw_text)
 
     def _call_structured(self, response_model, messages: List[Dict[str, str]], max_retries: int = 2):
-        """Call the Responses API and parse strict structured JSON into a Pydantic model."""
+        """Call the chat API and parse strict structured JSON into a Pydantic model."""
 
         if not self.client:
-            raise RuntimeError("Structured OpenAI client is not configured.")
+            raise RuntimeError("Structured AI client is not configured.")
 
         attempts = max(1, int(max_retries or 0) + 1)
         last_error: Exception | None = None
+        prepared_messages = self._chat_messages_with_json_schema(response_model, messages)
 
         for _ in range(attempts):
-            raw_text_parts: List[str] = []
             try:
-                with self.client.responses.stream(
-                    model=self.model_name,
-                    input=messages,
-                    text_format=response_model,
-                    temperature=0.2,
-                ) as stream:
-                    for event in stream:
-                        event_type = getattr(event, "type", "")
-                        if event_type == "response.output_text.delta":
-                            delta = getattr(event, "delta", "") or ""
-                            if delta:
-                                raw_text_parts.append(delta)
-                        elif event_type == "response.output_text.done" and not raw_text_parts:
-                            text = getattr(event, "text", "") or ""
-                            if text:
-                                raw_text_parts.append(text)
-
-                    final_response = stream.get_final_response()
-
-                parsed = getattr(final_response, "output_parsed", None)
-                if parsed is not None:
-                    return parsed
-
-                raw_text = "".join(raw_text_parts) or getattr(final_response, "output_text", "") or ""
+                raw_text = self._chat_completion_text(prepared_messages, json_mode=True, temperature=0.2)
                 try:
                     return response_model.model_validate_json(raw_text)
                 except Exception:
@@ -209,15 +302,32 @@ class ResumeAIEngine:
         raise RuntimeError("Structured model call failed without a captured exception.")
 
     def probe_model(self) -> Dict:
-        """Run a lightweight live probe against the configured model."""
+        """Run a lightweight live probe and return structured status for text + image models."""
 
         checked_at = datetime.now(timezone.utc).isoformat()
+
+        # Text generation status (DeepSeek V4)
+        text_status = self._probe_text_model(checked_at)
+
+        # Image generation status (hfsyapi Image2 / Image2 Pro)
+        image_status = self._probe_image_models(checked_at)
+
+        # Legacy top-level fields for backward compatibility
+        return {
+            **text_status,
+            "text_generation": text_status,
+            "image_generation": image_status,
+        }
+
+    def _probe_text_model(self, checked_at: str) -> Dict:
+        """Probe the text generation model (DeepSeek V4)."""
+
         base_payload = {
             "provider": self.provider_name,
-            "model": self.model_name,
+            "model": "deepseekv4",
             "base_url": self.effective_base_url,
             "checked_at": checked_at,
-            "wire_api": "responses.stream",
+            "wire_api": self.wire_api,
         }
 
         if not self.client:
@@ -225,10 +335,10 @@ class ResumeAIEngine:
                 **base_payload,
                 "configured": False,
                 "reachable": False,
-                "status": "fallback_only",
+                "status": "本地兜底",
                 "latency_ms": None,
                 "sample_output": "",
-                "error": "OPENAI_API_KEY is not configured.",
+                "error": "DeepSeek API key 未配置，当前使用本地兜底模式。",
             }
 
         started_at = time.perf_counter()
@@ -246,7 +356,7 @@ class ResumeAIEngine:
                 "status": "operational" if reachable else "degraded",
                 "latency_ms": latency_ms,
                 "sample_output": raw_text[:80],
-                "error": "" if reachable else "Probe completed but returned an empty response.",
+                "error": "" if reachable else "探测完成但返回空响应。",
             }
         except Exception as exc:
             latency_ms = int((time.perf_counter() - started_at) * 1000)
@@ -259,6 +369,29 @@ class ResumeAIEngine:
                 "sample_output": "",
                 "error": str(exc),
             }
+
+    def _probe_image_models(self, checked_at: str) -> Dict:
+        """Probe image generation models (hfsyapi Image2 / Image2 Pro)."""
+
+        # Note: We don't auto-probe image models to avoid consuming API calls
+        # Frontend should manually trigger image model probes when needed
+
+        return {
+            "image2": {
+                "model": "gpt-image-2",
+                "configured": False,
+                "reachable": False,
+                "latency_ms": None,
+                "error": "图片模型需手动刷新探测",
+            },
+            "image2_pro": {
+                "model": "gpt-image-2pro",
+                "configured": False,
+                "reachable": False,
+                "latency_ms": None,
+                "error": "图片模型需手动刷新探测",
+            },
+        }
 
     def _nonempty(self, values: List[str]) -> List[str]:
         """Drop blank list items created by UI forms."""
@@ -420,6 +553,7 @@ class ResumeAIEngine:
         compressed["experiences"] = self._limit_items(
             profile_payload.get("experiences", []), max_count, max_highlights
         )
+        compressed["awards"] = self._limit_items(profile_payload.get("awards", []), max_count, max_highlights)
         return compressed
 
     def _categorize_skills(self, skills: List[str]) -> List[ResumeSkillCategory]:
@@ -512,6 +646,16 @@ class ResumeAIEngine:
                 )
                 for item in payload.get("projects", [])
             ],
+            awards=[
+                ResumeAwardRecord(
+                    award_name=item.get("award_name", "").strip(),
+                    date=item.get("date", "").strip(),
+                    level=item.get("level", "").strip(),
+                    issuer=item.get("issuer", "").strip(),
+                    description=item.get("description", "").strip(),
+                )
+                for item in payload.get("awards", [])
+            ],
         )
 
     def _structured_from_existing_payload(self, payload: Dict) -> StructuredResume:
@@ -534,6 +678,7 @@ class ResumeAIEngine:
             education=[],
             skills=[],
             projects=[],
+            awards=[],
         )
 
     def _title_from_structured_resume(self, structured_resume: StructuredResume) -> str:
@@ -713,7 +858,7 @@ class ResumeAIEngine:
             "title": title,
             "resume_text": "\n".join(lines).strip(),
             "questions": follow_up_questions,
-            "analysis_notes": ["当前为本地兜底模式输出。接入 OPENAI_API_KEY 后会使用实时 AI 追问和润色。"],
+            "analysis_notes": ["当前为本地兜底模式输出。接入 DEEPSEEK_API_KEY 后会使用 DeepSeek V4 追问和润色。"],
         }
 
     def generate_questions(self, profile_payload: Dict) -> Dict:
@@ -743,10 +888,10 @@ class ResumeAIEngine:
         except Exception as exc:
             return {
                 "questions": fallback_questions,
-                "detected_gaps": ["openai_error"],
+                "detected_gaps": ["deepseek_error"],
                 "ready_for_generation": len(fallback_questions) == 0,
                 "used_ai": False,
-                "warning": f"OpenAI question generation failed: {exc}",
+                "warning": f"DeepSeek question generation failed: {exc}",
             }
 
     def generate_resume(self, profile_payload: Dict) -> Dict:
@@ -778,7 +923,7 @@ class ResumeAIEngine:
             result["questions"] = questions
             result["needs_clarification"] = len(questions) > 0
             result["used_ai"] = True
-            result["mode"] = "openai"
+            result["mode"] = "deepseek"
             return result
         except Exception as exc:
             fallback_result.update(
@@ -787,7 +932,7 @@ class ResumeAIEngine:
                     "used_ai": False,
                     "mode": "fallback",
                     "analysis_notes": fallback_result["analysis_notes"]
-                    + [f"OpenAI generation failed, fallback activated: {exc}"],
+                    + [f"DeepSeek generation failed, fallback activated: {exc}"],
                 }
             )
             return fallback_result
@@ -834,16 +979,16 @@ class ResumeAIEngine:
             result["resume_text"] = result.get("resume_text") or resume_text.strip()
             result.setdefault("analysis_notes", [])
             result["used_ai"] = True
-            result["mode"] = "openai"
+            result["mode"] = "deepseek"
             return result
         except Exception as exc:
             revised_text = (
-                f"{resume_text.strip()}\n\n## 优化说明\n- OpenAI 修订失败，保留当前版本并记录指令：{instruction.strip()}\n"
+                f"{resume_text.strip()}\n\n## 优化说明\n- DeepSeek 修订失败，保留当前版本并记录指令：{instruction.strip()}\n"
             ).strip()
             return {
                 "title": title,
                 "resume_text": revised_text,
-                "analysis_notes": [f"OpenAI revision failed, fallback activated: {exc}"],
+                "analysis_notes": [f"DeepSeek revision failed, fallback activated: {exc}"],
                 "used_ai": False,
                 "mode": "fallback",
             }
@@ -905,10 +1050,10 @@ class ResumeAIEngine:
                 "analysis_notes": result.get("analysis_notes") or [],
                 "needs_clarification": len(model_questions) > 0,
                 "used_ai": True,
-                "mode": "openai",
+                "mode": "deepseek",
             }
         except Exception as exc:
             fallback_result["analysis_notes"] = fallback_result["analysis_notes"] + [
-                f"OpenAI existing-resume optimization failed, fallback activated: {exc}"
+                f"DeepSeek existing-resume optimization failed, fallback activated: {exc}"
             ]
             return fallback_result

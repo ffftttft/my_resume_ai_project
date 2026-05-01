@@ -3,10 +3,10 @@ import {
   BadgeCheck,
   CircleDashed,
   ContactRound,
-  FileText,
   FolderKanban,
   GraduationCap,
   Sparkles,
+  Trophy,
   Wrench,
 } from "lucide-react";
 
@@ -96,6 +96,18 @@ function evaluateProjects(items) {
   return { status: "部分缺失", hint: "缺少项目时间范围或项目摘要。" };
 }
 
+function evaluateAwards(items) {
+  const list = asArray(items);
+  if (list.length === 0) return { status: "未生成", hint: "尚未生成获奖经历。" };
+  const hasCompleteRecord = list.some(
+    (item) => asText(item?.award_name) && (asText(item?.date) || asText(item?.level)),
+  );
+  if (hasCompleteRecord) {
+    return { status: "已完整", hint: "奖项名称、时间或等级已具备。" };
+  }
+  return { status: "部分缺失", hint: "缺少奖项名称、获奖时间或等级。" };
+}
+
 function evaluateEducation(items) {
   const list = asArray(items);
   if (list.length === 0) return { status: "未生成", hint: "尚未生成教育背景。" };
@@ -137,6 +149,11 @@ export default function ResumeCompletenessCard({ structuredResume }) {
       label: "项目经历",
       icon: FolderKanban,
       ...evaluateProjects(structuredResume?.projects),
+    },
+    {
+      label: "获奖经历",
+      icon: Trophy,
+      ...evaluateAwards(structuredResume?.awards),
     },
     {
       label: "教育背景",

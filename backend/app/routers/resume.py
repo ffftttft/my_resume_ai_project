@@ -9,7 +9,7 @@ from typing import List
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from app.models import (
     ApiEnvelope,
@@ -23,6 +23,9 @@ from app.models import (
     JobContextSearchRequest,
     RagSearchRequest,
     ReviseResumeRequest,
+    ResumeFileGenerateRequest,
+    ResumeImageGenerateRequest,
+    ResumeImageOcrWordRequest,
     SaveResumeSnapshotRequest,
     SaveWorkspaceRequest,
     SemanticATSScoreRequest,
@@ -30,7 +33,10 @@ from app.models import (
 )
 from app.services.file_service import FileService
 from app.services.memory_service import MemoryService
+from app.services.resume_docx_template_service import ResumeDocxTemplateService
+from app.services.resume_image_service import ResumeImageService
 from app.services.resume_service import ResumeService
+from app.services.umi_ocr_service import UmiOcrService
 
 
 router = APIRouter(prefix="/api", tags=["resume"])
@@ -83,6 +89,24 @@ def get_memory_service() -> MemoryService:
     raise RuntimeError("MemoryService dependency not configured.")
 
 
+def get_resume_image_service() -> ResumeImageService:
+    """Dependency placeholder replaced from app.main."""
+
+    raise RuntimeError("ResumeImageService dependency not configured.")
+
+
+def get_resume_docx_template_service() -> ResumeDocxTemplateService:
+    """Dependency placeholder replaced from app.main."""
+
+    raise RuntimeError("ResumeDocxTemplateService dependency not configured.")
+
+
+def get_umi_ocr_service() -> UmiOcrService:
+    """Dependency placeholder replaced from app.main."""
+
+    raise RuntimeError("UmiOcrService dependency not configured.")
+
+
 @router.get("/health", response_model=ApiEnvelope)
 def health_check(service: ResumeService = Depends(get_resume_service)) -> ApiEnvelope:
     """Simple health endpoint.
@@ -98,17 +122,246 @@ def health_check(service: ResumeService = Depends(get_resume_service)) -> ApiEnv
             "ai_available": service.ai_engine.is_available,
             "provider": service.ai_engine.provider_name,
             "base_url": service.ai_engine.effective_base_url,
-            "model": service.ai_engine.model_name,
-            "wire_api": "responses.stream",
+            "model": service.ai_engine.display_model_name,
+            "wire_api": service.ai_engine.wire_api,
         }
     )
 
 
 @router.get("/model-status", response_model=ApiEnvelope)
-def model_status(service: ResumeService = Depends(get_resume_service)) -> ApiEnvelope:
-    """Run a lightweight live probe against the configured model provider."""
+def model_status(
+    include_image_probe: bool = False,
+    service: ResumeService = Depends(get_resume_service),
+    image_service: ResumeImageService = Depends(get_resume_image_service),
+) -> ApiEnvelope:
+    """Return model status without running paid image probes."""
 
-    return ApiEnvelope(data=service.probe_model_status())
+    status = service.probe_model_status()
+    # Image2 is billed per generation through the broker. Keep this endpoint zero-cost:
+    # frontend refreshes only show configuration state until scheduled backend probes are added.
+    image_generation = image_service.probe_models(include_live_probe=False)
+    status["image_generation"] = image_generation
+    return ApiEnvelope(data=status)
+
+
+@router.get("/resume/image/templates", response_model=ApiEnvelope)
+def list_resume_image_templates(
+    image_service: ResumeImageService = Depends(get_resume_image_service),
+) -> ApiEnvelope:
+    """Return the resume image template catalog."""
+
+    return ApiEnvelope(data=image_service.list_templates())
+
+
+@router.get("/resume/image/templates/{template_id}/preview")
+def preview_resume_image_template(
+    template_id: str,
+    image_service: ResumeImageService = Depends(get_resume_image_service),
+) -> FileResponse:
+    """Return one template preview image."""
+
+    try:
+        path = image_service.get_template_path(template_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return FileResponse(path)
+
+
+@router.get("/resume/file/templates", response_model=ApiEnvelope)
+def list_resume_file_templates(
+    docx_service: ResumeDocxTemplateService = Depends(get_resume_docx_template_service),
+) -> ApiEnvelope:
+    """Return DOCX-template catalog for deterministic resume file generation."""
+
+    return ApiEnvelope(data=docx_service.list_templates())
+
+
+@router.get("/resume/file/templates/{template_id}/preview")
+def preview_resume_file_template(
+    template_id: str,
+    docx_service: ResumeDocxTemplateService = Depends(get_resume_docx_template_service),
+) -> FileResponse:
+    """Return one DOCX template thumbnail."""
+
+    try:
+        path = docx_service.get_template_preview_path(template_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return FileResponse(path)
+
+
+@router.post("/avatar/upload", response_model=ApiEnvelope)
+async def upload_avatar(
+    file: UploadFile = File(...),
+    image_service: ResumeImageService = Depends(get_resume_image_service),
+) -> ApiEnvelope:
+    """Upload one user avatar for image resume generation."""
+
+    try:
+        result = image_service.save_avatar_upload(file)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ApiEnvelope(data=result)
+
+
+@router.get("/avatar/{saved_name}")
+def preview_avatar(
+    saved_name: str,
+    image_service: ResumeImageService = Depends(get_resume_image_service),
+) -> FileResponse:
+    """Return one uploaded avatar image."""
+
+    try:
+        path = image_service.get_avatar_path(saved_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return FileResponse(path)
+
+
+@router.get("/resume/file/generated/{file_name}")
+def download_generated_resume_file(
+    file_name: str,
+    docx_service: ResumeDocxTemplateService = Depends(get_resume_docx_template_service),
+) -> FileResponse:
+    """Download one generated DOCX resume file."""
+
+    try:
+        path = docx_service.get_generated_docx_path(file_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    response = FileResponse(
+        path,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+    response.headers["Content-Disposition"] = _build_download_filename(path.name)
+    return response
+
+
+@router.get("/resume/file/preview/{image_name}")
+def preview_generated_resume_file(
+    image_name: str,
+    docx_service: ResumeDocxTemplateService = Depends(get_resume_docx_template_service),
+) -> FileResponse:
+    """Return one generated DOCX resume preview image."""
+
+    try:
+        path = docx_service.get_generated_preview_path(image_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return FileResponse(path)
+
+
+@router.post("/resume/file/generate", response_model=ApiEnvelope)
+def generate_resume_file(
+    payload: ResumeFileGenerateRequest,
+    docx_service: ResumeDocxTemplateService = Depends(get_resume_docx_template_service),
+) -> ApiEnvelope:
+    """Generate one DOCX-template-based resume file and preview."""
+
+    try:
+        result = docx_service.generate_resume_file(
+            resume_text=payload.resume_text,
+            template_id=payload.template_id,
+            structured_resume=payload.structured_resume,
+            form_state=payload.form_state,
+            avatar_saved_name=payload.avatar_saved_name,
+            board=payload.board,
+            file_name=payload.file_name,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Resume file generation failed: {exc}") from exc
+    return ApiEnvelope(data=result)
+
+
+@router.get("/resume/image/generated/{file_name}")
+def preview_generated_resume_image(
+    file_name: str,
+    image_service: ResumeImageService = Depends(get_resume_image_service),
+) -> FileResponse:
+    """Return one generated resume image."""
+
+    try:
+        path = image_service.get_generated_image_path(file_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return FileResponse(path)
+
+
+@router.post("/resume/image/generate", response_model=ApiEnvelope)
+def generate_resume_image(
+    payload: ResumeImageGenerateRequest,
+    image_service: ResumeImageService = Depends(get_resume_image_service),
+) -> ApiEnvelope:
+    """Generate one A4 resume image from the current resume text."""
+
+    try:
+        result = image_service.generate_resume_image(
+            resume_text=payload.resume_text,
+            template_id=payload.template_id,
+            avatar_saved_name=payload.avatar_saved_name,
+            model=payload.model,
+            board=payload.board,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Image generation failed: {exc}") from exc
+    return ApiEnvelope(data=result)
+
+
+@router.post("/resume/image/ocr-word")
+def export_resume_image_ocr_word(
+    payload: ResumeImageOcrWordRequest,
+    image_service: ResumeImageService = Depends(get_resume_image_service),
+    umi_ocr_service: UmiOcrService = Depends(get_umi_ocr_service),
+) -> StreamingResponse:
+    """Convert one generated resume image to editable Word via local Umi-OCR."""
+
+    try:
+        image_path = image_service.get_generated_image_path(payload.image_saved_name)
+        result = umi_ocr_service.export_word_from_image(
+            image_path=image_path,
+            file_name=payload.file_name,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    response = StreamingResponse(result["content"], media_type=result["media_type"])
+    response.headers["Content-Disposition"] = _build_download_filename(result["file_name"])
+    response.headers["X-OCR-Block-Count"] = str(result.get("block_count", 0))
+    response.headers["X-OCR-Low-Confidence-Count"] = str(result.get("low_confidence_count", 0))
+    response.headers["X-Generated-Document-Name"] = result.get("saved_name") or result["file_name"]
+    return response
+
+
+@router.get("/resume/image/ocr-word/{file_name}")
+def download_resume_image_ocr_word(
+    file_name: str,
+    umi_ocr_service: UmiOcrService = Depends(get_umi_ocr_service),
+) -> FileResponse:
+    """Download a previously generated OCR Word document."""
+
+    try:
+        path = umi_ocr_service.get_generated_document_path(file_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    response = FileResponse(
+        path,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+    response.headers["Content-Disposition"] = _build_download_filename(path.name)
+    return response
 
 
 @router.post("/ats/semantic-score", response_model=ApiEnvelope)
@@ -116,7 +369,7 @@ def score_semantic_ats(
     payload: SemanticATSScoreRequest,
     service: ResumeService = Depends(get_resume_service),
 ) -> ApiEnvelope:
-    """Return embedding-based ATS scoring with lexical fallback."""
+    """Return deterministic enterprise-style ATS scoring."""
 
     result = service.score_semantic_ats(
         resume_text=payload.resume_text,
@@ -282,7 +535,7 @@ def generate_resume(
 ) -> ApiEnvelope:
     """Generate a resume draft from the collected profile information."""
 
-    result = service.generate_resume(payload.profile)
+    result = service.generate_resume(payload.profile, template_id=payload.template_id)
     return ApiEnvelope(data=result)
 
 
@@ -295,7 +548,7 @@ def stream_generate_resume(
 
     def event_stream():
         try:
-            for event in service.stream_generate_resume(payload.profile):
+            for event in service.stream_generate_resume(payload.profile, template_id=payload.template_id):
                 yield _encode_sse(event.get("event", "message"), event.get("data") or {})
         except Exception as exc:
             yield _encode_sse("error", {"message": f"SSE stream crashed: {exc}"})

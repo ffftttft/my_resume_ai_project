@@ -1,0 +1,18 @@
+[
+  {
+    "id": "state-owned-general",
+    "name": "央国企通用简历模板",
+    "category": "央国企",
+    "description": "以 DOCX 原模板为主，尽量只替换文字和头像，不改变字体、字号与整体版式。",
+    "docx_file_name": "state-owned-general.docx",
+    "preview_file_name": "state-owned-general.jpg",
+    "style_tags": ["A4", "中文", "DOCX", "稳重"],
+    "is_default": true,
+    "capacity": {
+      "experience_items": 1,
+      "project_items": 2,
+      "bullets_per_item": 3,
+      "max_bullet_chars": 42
+    }
+  }
+]
