@@ -88,6 +88,7 @@ class ResumeFacts:
     education: List[ResumeItem] = field(default_factory=list)
     experience: List[ResumeItem] = field(default_factory=list)
     projects: List[ResumeItem] = field(default_factory=list)
+    campus: List[ResumeItem] = field(default_factory=list)
     awards: List[str] = field(default_factory=list)
     skills: List[str] = field(default_factory=list)
 
@@ -250,21 +251,21 @@ class ResumeDocxTemplateService:
             else auto_stem
         )
         docx_name = f"{stem}.docx"
-        preview_name = f"{stem}.png"
         docx_path = self.generated_dir / docx_name
-        preview_path = self.preview_dir / preview_name
         docx_path.write_bytes(filled_docx)
-        preview_result = self._render_docx_preview(docx_path, preview_path)
-        layout_report["preview"] = preview_result
-        preview_ready = bool(preview_result.get("ok") and preview_path.exists())
+        layout_report["preview"] = {
+            "ok": False,
+            "skipped": True,
+            "message": "已取消 Word 图片预览渲染，避免依赖本机 Word 或 LibreOffice；请保存 Word 后打开检查。",
+        }
 
         return {
             "kind": "docx_template",
             "file_name": docx_name,
             "saved_name": docx_name,
             "download_url": self._public_url("resume/file/generated", docx_name),
-            "preview_name": preview_name if preview_ready else "",
-            "preview_url": self._public_url("resume/file/preview", preview_name) if preview_ready else "",
+            "preview_name": "",
+            "preview_url": "",
             "template_id": template_id,
             "template_name": template.get("name") or template_id,
             "board": board,
@@ -302,9 +303,6 @@ class ResumeDocxTemplateService:
             self._apply_template_slots(paragraphs, facts, capacity, layout_report, remove_indices)
             self._remove_paragraphs(root, remove_indices)
             self._strip_review_markup(root, layout_report)
-            layout_report["font_normalized"] = self._normalize_document_fonts(root)
-            if layout_report["font_normalized"]:
-                layout_report["fixed_issues"].append("已将正文中文字体规范为宋体，英文和数字规范为 Times New Roman。")
             self._audit_document(root, layout_report)
 
             document_bytes = ET.tostring(root, encoding="utf-8", xml_declaration=True)
@@ -323,7 +321,7 @@ class ResumeDocxTemplateService:
                     elif item.filename == "word/_rels/document.xml.rels":
                         target_zip.writestr(item, self._clean_document_relationships(source_zip.read(item.filename), layout_report))
                     elif item.filename == "word/styles.xml":
-                        target_zip.writestr(item, self._normalize_styles_xml_fonts(source_zip.read(item.filename)))
+                        target_zip.writestr(item, source_zip.read(item.filename))
                     elif item.filename == "[Content_Types].xml":
                         target_zip.writestr(item, self._clean_content_types(source_zip.read(item.filename), layout_report))
                     else:
@@ -395,13 +393,13 @@ class ResumeDocxTemplateService:
             fill_bullet_ids(bullet_slot, item, max_slots=bullets_per_item)
 
         education = facts.education[0] if facts.education else ResumeItem()
-        selected_records, omitted_records = self._select_template_records(facts, capacity)
+        record_assignments, selected_records, omitted_records = self._assign_record_slots(facts, capacity)
         skills = self._normalize_skill_lines(facts.skills)
-        summary_lines = self._split_summary(facts.summary)
+        summary_lines = self._summary_lines(facts, max_bullet_chars, layout_notes)
         layout_report["selected_records"] = [self._record_label(kind, item) for kind, item in selected_records]
         layout_report["omitted_records"] = [self._record_label(kind, item) for kind, item in omitted_records]
         if omitted_records:
-            layout_notes.append(f"一页容量最多放入 3 条实习/项目/荣誉，已省略 {len(omitted_records)} 条低优先级内容。")
+            layout_notes.append(f"一页模板当前最多放入 3 条实习/项目/校园经历，已省略 {len(omitted_records)} 条低优先级经历。")
 
         set_id("title", "",)
         self._set_title_parts(by_id, facts)
@@ -428,54 +426,34 @@ class ResumeDocxTemplateService:
             remove_id("education_header")
             remove_id("education_bullets")
 
-        experience_records = [item for kind, item in selected_records if kind == "experience"]
-        project_records = [item for kind, item in selected_records if kind == "project"]
-        award_records = [item for kind, item in selected_records if kind == "award"]
-
-        first_formal_project_in_intern_slot = False
-        if experience_records:
-            set_id("intern_title_bg", "    实习经历")
-            set_id("intern_title_text", "    实习经历")
-            fill_record("intern_header", "intern_bullets", experience_records[0])
-        elif project_records:
-            first_formal_project_in_intern_slot = True
-            set_id("intern_title_bg", "    项目经历")
-            set_id("intern_title_text", "    项目经历")
-            fill_record("intern_header", "intern_bullets", project_records[0])
-            project_records = project_records[1:]
-        else:
-            remove_id("intern_title_bg")
-            remove_id("intern_title_text")
-            remove_id("intern_header")
-            remove_id("intern_bullets")
-
-        if project_records:
-            if first_formal_project_in_intern_slot:
-                remove_id("project_title_bg")
-                remove_id("project_title_text")
+        title_by_kind = {
+            "experience": "实习经历",
+            "project": "项目经历",
+            "campus": "校园经历",
+        }
+        slot_defs = {
+            "intern": ("intern_title_bg", "intern_title_text", "intern_header", "intern_bullets"),
+            "project": ("project_title_bg", "project_title_text", "project_header", "project_bullets"),
+            "campus": ("campus_title_bg", "campus_title_text", "campus_header", "campus_bullets"),
+        }
+        for slot_name, (title_bg, title_text, header_slot, bullet_slot) in slot_defs.items():
+            assignment = record_assignments.get(slot_name)
+            if assignment:
+                kind, item = assignment
+                title = title_by_kind.get(kind, "经历")
+                set_id(title_bg, f"    {title}")
+                set_id(title_text, f"    {title}", occurrence=0)
+                if title_text == "project_title_text":
+                    remove_id(title_text, occurrence=1)
+                fill_record(header_slot, bullet_slot, item)
             else:
-                set_id("project_title_bg", "    项目经历")
-                set_id("project_title_text", "    项目经历", occurrence=0)
-                remove_id("project_title_text", occurrence=1)
-            fill_record("project_header", "project_bullets", project_records[0])
-        else:
-            remove_id("project_title_bg")
-            remove_id("project_title_text")
-            remove_id("project_header")
-            remove_id("project_bullets")
+                remove_id(title_bg)
+                remove_id(title_text)
+                remove_id(header_slot)
+                remove_id(bullet_slot)
 
-        if len(project_records) > 1:
-            remove_id("campus_title_bg")
-            remove_id("campus_title_text")
-            fill_record("campus_header", "campus_bullets", project_records[1])
-        else:
-            remove_id("campus_title_bg")
-            remove_id("campus_title_text")
-            remove_id("campus_header")
-            remove_id("campus_bullets")
-
-        if award_records:
-            award_lines = [self._compact_text(item.summary or item.title, 46, layout_notes) for item in award_records[:2]]
+        if facts.awards:
+            award_lines = [self._compact_text(item, 46, layout_notes) for item in facts.awards[:2]]
             set_id("award_title", "荣誉奖励")
             for offset, para_id in enumerate(TEMPLATE_SLOTS["award_bullets"]):
                 if offset < len(award_lines) and award_lines[offset]:
@@ -497,21 +475,15 @@ class ResumeDocxTemplateService:
             remove_id("skill_title")
             remove_id("skill_bullets")
 
-        if summary_lines:
-            set_id("summary_title", "自我评价")
-            for offset, para_id in enumerate(TEMPLATE_SLOTS["summary_bullets"]):
-                if offset < len(summary_lines):
-                    set_para_id(para_id, summary_lines[offset], bullet=True)
-                else:
-                    remove_id(para_id)
-        else:
-            remove_id("summary_title")
-            remove_id("summary_bullets")
+        set_id("summary_title", "自我评价")
+        for offset, para_id in enumerate(TEMPLATE_SLOTS["summary_bullets"]):
+            set_para_id(para_id, summary_lines[offset], bullet=True)
 
         layout_report["template_diff"].extend(
             [
                 "已替换姓名、联系方式、目标岗位、教育、经历、技能和总结文本。",
-                "已按模板容量选择最多 3 条实习/项目/荣誉记录。",
+                "已按七大模块规则分配教育、实习、项目、校园、荣誉、技能和自我评价内容。",
+                "技能证书最多放入 3 点；自我评价固定 3 点，缺少时使用通用求职表达补齐。",
                 "未修改字号、加粗、颜色、页面边距、图标和分割线对象。",
             ]
         )
@@ -543,40 +515,57 @@ class ResumeDocxTemplateService:
                 text_nodes[1].set(f"{{{XML_NS}}}space", "preserve")
             text_nodes[-1].text = f"意向岗位：{facts.target_role or '目标岗位'}"
 
-    def _select_template_records(
+    def _assign_record_slots(
         self,
         facts: ResumeFacts,
         capacity: Dict[str, Any],
-    ) -> tuple[List[tuple[str, ResumeItem]], List[tuple[str, ResumeItem]]]:
+    ) -> tuple[Dict[str, tuple[str, ResumeItem]], List[tuple[str, ResumeItem]], List[tuple[str, ResumeItem]]]:
         max_records = int(capacity.get("career_record_limit") or 3)
         buckets: Dict[str, List[ResumeItem]] = {
             "experience": facts.experience,
             "project": facts.projects,
-            "award": [ResumeItem(title=item, summary=item) for item in facts.awards],
+            "campus": facts.campus,
         }
         ranked = {
             kind: sorted(items, key=lambda item: self._record_score(item, facts), reverse=True)
             for kind, items in buckets.items()
         }
+        natural_slot = {
+            "experience": "intern",
+            "project": "project",
+            "campus": "campus",
+        }
+        assignments: Dict[str, tuple[str, ResumeItem]] = {}
         selected: List[tuple[str, ResumeItem]] = []
         omitted: List[tuple[str, ResumeItem]] = []
-        for kind in ("experience", "project", "award"):
+
+        for kind in ("experience", "project", "campus"):
+            slot = natural_slot[kind]
             if ranked[kind] and len(selected) < max_records:
-                selected.append((kind, ranked[kind][0]))
-        leftovers: List[tuple[str, ResumeItem]] = []
-        for kind in ("project", "experience", "award"):
-            leftovers.extend((kind, item) for item in ranked[kind][1:])
-        for kind, item in sorted(leftovers, key=lambda pair: self._record_score(pair[1], facts), reverse=True):
-            if len(selected) < max_records:
+                item = ranked[kind][0]
+                assignments[slot] = (kind, item)
                 selected.append((kind, item))
-            else:
-                omitted.append((kind, item))
+
+        empty_slots = [slot for slot in ("intern", "project", "campus") if slot not in assignments]
+        used_ids = {id(item) for _kind, item in selected}
+        for slot in empty_slots:
+            chosen: tuple[str, ResumeItem] | None = None
+            for kind in ("experience", "campus", "project"):
+                chosen = next(((kind, item) for item in ranked[kind] if id(item) not in used_ids), None)
+                if chosen:
+                    break
+            if chosen and len(selected) < max_records:
+                kind, item = chosen
+                assignments[slot] = (kind, item)
+                selected.append((kind, item))
+                used_ids.add(id(item))
+
         selected_ids = {id(item) for _kind, item in selected}
         for kind, items in buckets.items():
             for item in items:
                 if id(item) not in selected_ids and not any(id(item) == id(existing) for _k, existing in omitted):
                     omitted.append((kind, item))
-        return selected, omitted
+        return assignments, selected, omitted
 
     def _record_score(self, item: ResumeItem, facts: ResumeFacts) -> int:
         haystack = " ".join(
@@ -604,7 +593,7 @@ class ResumeDocxTemplateService:
 
     @staticmethod
     def _record_label(kind: str, item: ResumeItem) -> Dict[str, str]:
-        labels = {"experience": "实习/工作", "project": "项目", "award": "荣誉"}
+        labels = {"experience": "实习/工作", "project": "项目", "campus": "校园"}
         return {
             "kind": kind,
             "label": labels.get(kind, kind),
@@ -966,12 +955,12 @@ try {
             for paragraph in root.findall(".//w:p", NS)
             if not paragraph.findall(".//w:p", NS)
         ]
-        body_text = "\n".join(
+        paragraph_texts = [
             "".join(node.text or "" for node in paragraph.findall(".//w:t", NS)).strip()
             for paragraph in visible_paragraphs
-        )
+        ]
         hard_errors = []
-        if re.search(r"项目经历\s*项目经历", body_text) or re.search(r"实习经历\s*实习经历", body_text):
+        if any(re.search(r"项目经历\s*项目经历", text) or re.search(r"实习经历\s*实习经历", text) for text in paragraph_texts):
             hard_errors.append("检测到重复模块标题，需要重新生成。")
         if len(layout_report.get("selected_records") or []) > 3:
             hard_errors.append("入版经历超过 3 条，不符合一页模板容量限制。")
@@ -1069,6 +1058,7 @@ try {
         facts.education = [item for item in self._extract_education(structured_resume, form_state, sections) if self._has_item_content(item)]
         facts.experience = [item for item in self._extract_experience(structured_resume, form_state, sections) if self._has_item_content(item)]
         facts.projects = [item for item in self._extract_projects(structured_resume, form_state, sections) if self._has_item_content(item)]
+        facts.campus = [item for item in self._extract_campus(structured_resume, form_state, sections) if self._has_item_content(item)]
         facts.awards = self._extract_awards(structured_resume, form_state, sections)
         facts.skills = self._extract_skills(structured_resume, form_state, sections)
         return facts
@@ -1201,6 +1191,67 @@ try {
             return records
         return self._items_from_section(sections.get("项目经历") or "", default_title="项目经历")
 
+    def _extract_campus(self, structured: Dict[str, Any], form_state: Dict[str, Any], sections: Dict[str, str]) -> List[ResumeItem]:
+        records = []
+        campus_sources = (
+            structured.get("campus_experience")
+            or structured.get("campus_experiences")
+            or structured.get("campus")
+            or structured.get("school_experience")
+            or structured.get("activities")
+            or []
+        )
+        if isinstance(campus_sources, dict):
+            campus_sources = [campus_sources]
+        for item in campus_sources:
+            if not isinstance(item, dict):
+                records.append(ResumeItem(title=str(item), bullets=[str(item)]))
+                continue
+            records.append(
+                ResumeItem(
+                    title=str(item.get("activity_name") or item.get("name") or item.get("title") or ""),
+                    role=str(item.get("role") or item.get("position") or ""),
+                    organization=str(item.get("organization") or item.get("club") or item.get("school") or ""),
+                    location=str(item.get("location") or ""),
+                    start_date=str(item.get("start_date") or ""),
+                    end_date=str(item.get("end_date") or ""),
+                    summary=str(item.get("summary") or item.get("description") or ""),
+                    bullets=self._string_list(item.get("achievements") or item.get("highlights")),
+                    tools=self._string_list(item.get("tools")),
+                )
+            )
+        records = [item for item in records if self._has_item_content(item)]
+        if records:
+            return records
+        form_campus_sources = form_state.get("campus_experiences") or form_state.get("campus") or []
+        if isinstance(form_campus_sources, dict):
+            form_campus_sources = [form_campus_sources]
+        for item in form_campus_sources:
+            records.append(
+                ResumeItem(
+                    title=str(item.get("name") or item.get("title") or ""),
+                    role=str(item.get("role") or item.get("position") or ""),
+                    organization=str(item.get("organization") or item.get("club") or ""),
+                    location=str(item.get("location") or ""),
+                    start_date=str(item.get("start_date") or self._split_duration(item.get("duration"))[0]),
+                    end_date=str(item.get("end_date") or self._split_duration(item.get("duration"))[1]),
+                    summary=str(item.get("summary") or item.get("description") or ""),
+                    bullets=self._split_lines(item.get("highlights_text")),
+                    tools=self._split_lines(item.get("tools_text")) or self._string_list(item.get("tools")),
+                )
+            )
+        records = [item for item in records if self._has_item_content(item)]
+        if records:
+            return records
+        return self._items_from_section(
+            sections.get("校园经历")
+            or sections.get("校园活动")
+            or sections.get("学生工作")
+            or sections.get("社团经历")
+            or "",
+            default_title="校园经历",
+        )
+
     def _extract_awards(self, structured: Dict[str, Any], form_state: Dict[str, Any], sections: Dict[str, str]) -> List[str]:
         awards = []
         for item in structured.get("awards") or []:
@@ -1267,6 +1318,10 @@ try {
             "实习/工作经历": "实习/工作经历",
             "项目经历": "项目经历",
             "项目经验": "项目经历",
+            "校园经历": "校园经历",
+            "校园活动": "校园经历",
+            "学生工作": "校园经历",
+            "社团经历": "校园经历",
             "获奖情况": "获奖情况",
             "获奖经历": "获奖情况",
             "荣誉奖励": "获奖情况",
@@ -1512,6 +1567,20 @@ try {
     @staticmethod
     def _skill_line(skills: List[str], index: int, fallback: str) -> str:
         return skills[index] if index < len(skills) and skills[index] else fallback
+
+    def _summary_lines(self, facts: ResumeFacts, max_chars: int, layout_notes: List[str]) -> List[str]:
+        lines = self._split_summary(facts.summary)
+        role = facts.target_role or "目标岗位"
+        generic = [
+            f"岗位匹配：围绕{role}要求，重视事实梳理、结果交付和持续复盘。",
+            "工作方式：具备较强执行力和沟通协作意识，能够按要求推进任务落地。",
+            "发展意愿：保持学习主动性，愿意持续补齐业务知识、工具方法和岗位能力。",
+        ]
+        for value in generic:
+            if len(lines) >= 3:
+                break
+            lines.append(value)
+        return [self._compact_text(value, max_chars, layout_notes) for value in lines[:3]]
 
     @staticmethod
     def _split_summary(value: str) -> List[str]:

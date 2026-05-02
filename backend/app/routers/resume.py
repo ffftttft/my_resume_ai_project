@@ -440,8 +440,8 @@ def delete_resume_snapshot(
 ) -> ApiEnvelope:
     """Delete one saved resume snapshot from memory.json."""
 
-    deleted = service.delete_resume_snapshot(payload.timestamp)
-    return ApiEnvelope(data={"deleted": deleted, "timestamp": payload.timestamp})
+    result = service.delete_resume_snapshot(payload.timestamp)
+    return ApiEnvelope(data=result)
 
 
 @router.post("/upload/preview", response_model=ApiEnvelope)

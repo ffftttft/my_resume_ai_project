@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from io import BytesIO
-from typing import Dict, Tuple
+from pathlib import Path
+from typing import Any, Dict, Tuple
 
 from ai_modules.engine_v3 import ResumeAIEngine
 from app.models import UserProfile
@@ -26,6 +27,7 @@ class ResumeService:
         semantic_ats_service: SemanticATSService,
         rag_service: RagService,
         job_search_service: JobSearchService,
+        generated_artifact_dirs: list[Path] | None = None,
     ):
         self.memory_service = memory_service
         self.profile_memory_service = profile_memory_service
@@ -33,6 +35,7 @@ class ResumeService:
         self.semantic_ats_service = semantic_ats_service
         self.rag_service = rag_service
         self.job_search_service = job_search_service
+        self.generated_artifact_dirs = [Path(path).resolve() for path in (generated_artifact_dirs or [])]
 
     def reset_ai_session_context(self) -> Dict:
         """Clear transient AI context and reload only the compact persistent user profile."""
@@ -224,10 +227,88 @@ class ResumeService:
             force_refresh=force_refresh,
         )
 
-    def delete_resume_snapshot(self, timestamp: str) -> bool:
-        """Delete one saved resume snapshot."""
+    def delete_resume_snapshot(self, timestamp: str) -> Dict[str, Any]:
+        """Delete one saved resume snapshot and unreferenced generated local files."""
 
-        return self.memory_service.delete_resume_snapshot(timestamp)
+        before_payload = self.memory_service.load()
+        target_snapshot = next(
+            (item for item in before_payload.get("resume_snapshots", []) if item.get("timestamp") == timestamp),
+            None,
+        )
+        if not target_snapshot:
+            return {
+                "deleted": False,
+                "timestamp": timestamp,
+                "local_deleted": [],
+                "local_deleted_count": 0,
+            }
+
+        target_artifacts = self._snapshot_artifact_names(target_snapshot)
+        deleted = self.memory_service.delete_resume_snapshot(timestamp)
+        if not deleted:
+            return {
+                "deleted": False,
+                "timestamp": timestamp,
+                "local_deleted": [],
+                "local_deleted_count": 0,
+            }
+
+        remaining_payload = self.memory_service.load()
+        still_referenced = set()
+        for snapshot in remaining_payload.get("resume_snapshots", []):
+            still_referenced.update(self._snapshot_artifact_names(snapshot))
+
+        local_deleted = self._delete_unreferenced_artifacts(target_artifacts - still_referenced)
+        return {
+            "deleted": True,
+            "timestamp": timestamp,
+            "local_deleted": local_deleted,
+            "local_deleted_count": len(local_deleted),
+        }
+
+    def _snapshot_artifact_names(self, snapshot: Dict[str, Any]) -> set[str]:
+        """Collect generated file names referenced by a snapshot's file/image generation state."""
+
+        allowed_suffixes = {".docx", ".png", ".jpg", ".jpeg", ".webp"}
+        allowed_keys = {"saved_name", "preview_name", "file_name"}
+        found: set[str] = set()
+
+        def walk(value: Any, key_name: str = "") -> None:
+            if isinstance(value, dict):
+                for key, child in value.items():
+                    walk(child, str(key))
+                return
+            if isinstance(value, list):
+                for child in value:
+                    walk(child, key_name)
+                return
+            if key_name not in allowed_keys or not isinstance(value, str):
+                return
+            if value.startswith(("http://", "https://", "/api/")):
+                return
+            name = Path(value).name
+            if Path(name).suffix.lower() in allowed_suffixes:
+                found.add(name)
+
+        walk(snapshot.get("image_generation") or {})
+        return found
+
+    def _delete_unreferenced_artifacts(self, artifact_names: set[str]) -> list[str]:
+        """Delete generated local files by basename, limited to configured generated dirs."""
+
+        deleted: list[str] = []
+        for name in sorted(artifact_names):
+            if not name:
+                continue
+            for directory in self.generated_artifact_dirs:
+                candidate = (directory / name).resolve()
+                if directory not in candidate.parents and candidate != directory:
+                    continue
+                if not candidate.exists() or not candidate.is_file():
+                    continue
+                candidate.unlink()
+                deleted.append(str(candidate))
+        return deleted
 
     def optimize_existing_resume(self, payload: Dict) -> Dict:
         """Optimize an uploaded resume for a target job."""

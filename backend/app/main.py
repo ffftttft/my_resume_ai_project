@@ -85,6 +85,12 @@ resume_service = ResumeService(
     semantic_ats_service=semantic_ats_service,
     rag_service=rag_service,
     job_search_service=job_search_service,
+    generated_artifact_dirs=[
+        settings.generated_resume_file_dir,
+        settings.generated_resume_file_preview_dir,
+        settings.generated_resume_image_dir,
+        settings.generated_resume_document_dir,
+    ],
 )
 
 app = FastAPI(
