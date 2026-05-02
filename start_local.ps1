@@ -13,6 +13,8 @@ $ErrorActionPreference = "Stop"
 
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $FrontendRoot = Join-Path $ProjectRoot "frontend_app"
+$VenvRoot = Join-Path $ProjectRoot ".venv"
+$PythonExe = Join-Path $VenvRoot "Scripts\python.exe"
 $BackendEnvExample = Join-Path $ProjectRoot "backend\.env.example"
 $BackendEnv = Join-Path $ProjectRoot "backend\.env"
 $FrontendEnvExample = Join-Path $FrontendRoot ".env.example"
@@ -49,8 +51,13 @@ function Ensure-EnvFile {
 
 function Test-BackendDependencies {
     # Check whether required backend packages are already available.
-    python -c "import fastapi, uvicorn, openai, pydantic_settings, pypdf, pptx" *> $null
-    return $LASTEXITCODE -eq 0
+    try {
+        & $PythonExe -c "import fastapi, uvicorn, openai, pydantic_settings, pypdf, pptx, chromadb, requests, docx, PIL" *> $null
+        return $LASTEXITCODE -eq 0
+    }
+    catch {
+        return $false
+    }
 }
 
 Set-Location $ProjectRoot
@@ -58,6 +65,14 @@ Set-Location $ProjectRoot
 Write-Step "Preparing local runtime environment"
 Ensure-Command -CommandName "python" -InstallHint "Please install Python 3 first."
 Ensure-Command -CommandName "npm" -InstallHint "Please install Node.js first."
+
+if (-not (Test-Path $PythonExe)) {
+    Write-Step "Creating local Python virtual environment"
+    python -m venv $VenvRoot
+}
+
+Write-Step "Using Python runtime: $PythonExe"
+& $PythonExe -m pip install --upgrade pip *> $null
 
 Ensure-EnvFile -SourcePath $BackendEnvExample -TargetPath $BackendEnv
 Ensure-EnvFile -SourcePath $FrontendEnvExample -TargetPath $FrontendEnv
@@ -73,7 +88,7 @@ else {
 
 if (-not (Test-BackendDependencies)) {
     Write-Step "Installing backend dependencies"
-    python -m pip install -r (Join-Path $ProjectRoot "backend\requirements.txt")
+    & $PythonExe -m pip install -r (Join-Path $ProjectRoot "backend\requirements.txt")
 }
 else {
     Write-Step "Backend dependencies already available"
@@ -92,7 +107,7 @@ if ($PrepareOnly) {
     exit 0
 }
 
-$backendCommand = "Set-Location `"$ProjectRoot`"; python backend\run_local.py"
+$backendCommand = "Set-Location `"$ProjectRoot`"; & `"$PythonExe`" backend\run_local.py"
 $frontendCommand = "Set-Location `"$FrontendRoot`"; npm run dev"
 
 Write-Step "Starting backend window"
